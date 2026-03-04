@@ -797,33 +797,6 @@ function SettingsNumberRow({
   )
 }
 
-function SettingsTextRow({
-  label,
-  description,
-  value,
-  onChange,
-}: {
-  label: string
-  description: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <p className="text-foreground text-sm font-medium">{label}</p>
-        <p className="text-muted-foreground text-xs">{description}</p>
-      </div>
-      <input
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 w-40 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
-      />
-    </div>
-  )
-}
-
 /** Форматирует KeyboardEvent в строку шортката (Super+Shift+K и т.д.). */
 function formatShortcutFromEvent(event: KeyboardEvent): string {
   const mods: string[] = []

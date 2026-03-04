@@ -53,7 +53,7 @@ export function useGlobalShortcuts(): void {
       try {
         await unregisterAll()
       } catch (e) {
-        logger.warn('global shortcut unregisterAll failed', e)
+        logger.warn('global shortcut unregisterAll failed', { error: e })
       }
       if (cancelled) return
       registeredRef.current = shortcuts
@@ -76,14 +76,14 @@ export function useGlobalShortcuts(): void {
           }
         })
       } catch (e) {
-        logger.error('global shortcut register failed', e)
+        logger.error('global shortcut register failed', { error: e })
       }
     }
 
     void run()
     return () => {
       cancelled = true
-      void unregisterAll().catch((e) => logger.warn('global shortcut cleanup unregisterAll failed', e))
+      void unregisterAll().catch((e) => logger.warn('global shortcut cleanup unregisterAll failed', { error: e }))
       registeredRef.current = []
     }
   }, [hotkeys.openPalette, hotkeys.openDashboard, hotkeys.openSettings])
