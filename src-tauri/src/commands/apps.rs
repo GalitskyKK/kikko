@@ -6,6 +6,12 @@ use std::path::Path;
 use std::path::PathBuf;
 use tauri::Manager;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 #[derive(Debug, Serialize)]
 pub struct AppInfo {
   pub id: String,
@@ -185,6 +191,7 @@ fn extract_icon_with_powershell(source_path: &str, output_file: &Path) -> Result
   );
 
   let status = std::process::Command::new("powershell")
+    .creation_flags(CREATE_NO_WINDOW)
     .args(["-NoProfile", "-NonInteractive", "-Command", &script])
     .status()
     .map_err(|e| e.to_string())?;
@@ -212,6 +219,7 @@ pub fn open_path(path: String) -> Result<(), String> {
   #[cfg(target_os = "windows")]
   {
     std::process::Command::new("cmd")
+      .creation_flags(CREATE_NO_WINDOW)
       .args(["/C", "start", "", path])
       .spawn()
       .map_err(|e| e.to_string())?;

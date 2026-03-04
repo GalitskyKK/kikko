@@ -20,6 +20,7 @@ import { useSnippetStore } from '@/stores/snippet-store'
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { logger } from '@/utils/logger'
+import { useTray } from '@/lib/use-tray'
 
 /** Хук: подписка на навигацию из Rust (шорткат Win+J → dashboard и др.) */
 function useNavigateFromBackend() {
@@ -145,6 +146,7 @@ function useSettingsSyncOnWindowFocus() {
 /** Корневой компонент приложения: роутер + глобальные провайдеры */
 export function App() {
   const appearance = useSettingsStore((state) => state.appearance)
+  useTray()
   useClipboardPolling()
   usePreloadSearchData()
   useSettingsSyncOnWindowFocus()

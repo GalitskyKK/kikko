@@ -1,6 +1,14 @@
 use serde::Deserialize;
 use serde::Serialize;
 use std::process::Command;
+use tauri::Manager;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+/// Не показывать окно консоли при запуске процесса (Windows).
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug, Deserialize)]
 pub struct RunSystemCommandInput {
@@ -31,6 +39,7 @@ pub async fn open_system_preferences(section_id: String) -> Result<(), String> {
     };
 
     Command::new("cmd")
+      .creation_flags(CREATE_NO_WINDOW)
       .args(["/C", "start", "", uri])
       .status()
       .map_err(|error| error.to_string())?;
@@ -88,9 +97,40 @@ pub async fn open_windows_settings(section_id: String) -> Result<(), String> {
   open_system_preferences(section_id).await
 }
 
+/// Завершает приложение (для пункта «Выход» в трее).
+#[tauri::command]
+pub fn exit_app(app: tauri::AppHandle) {
+  app.exit(0);
+}
+
+/// Показать/скрыть палетку (вызов с фронта при нажатии глобального шортката).
+#[tauri::command]
+pub async fn show_palette_or_toggle(app: tauri::AppHandle) -> Result<(), String> {
+  let window = app
+    .get_webview_window("main")
+    .ok_or_else(|| "main window not found".to_string())?;
+  let visible = window.is_visible().unwrap_or(false);
+  if visible {
+    let _ = window.hide();
+  } else {
+    let _ = window.set_size(tauri::PhysicalSize::new(760, 500));
+    if let Ok(Some(monitor)) = window.current_monitor() {
+      let monitor_size = monitor.size();
+      let target_width: i32 = 760;
+      let x = ((monitor_size.width as i32 - target_width) / 2).max(0);
+      let y = 86;
+      let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+  }
+  Ok(())
+}
+
 #[cfg(target_os = "windows")]
 fn run_lock() -> i32 {
   Command::new("rundll32.exe")
+    .creation_flags(CREATE_NO_WINDOW)
     .args(["user32.dll,LockWorkStation"])
     .status()
     .map(|s| s.code().unwrap_or(-1))
@@ -100,6 +140,7 @@ fn run_lock() -> i32 {
 #[cfg(target_os = "windows")]
 fn run_sleep() -> i32 {
   Command::new("rundll32.exe")
+    .creation_flags(CREATE_NO_WINDOW)
     .args(["powrprof.dll,SetSuspendState", "0", "1", "0"])
     .status()
     .map(|s| s.code().unwrap_or(-1))
@@ -109,6 +150,7 @@ fn run_sleep() -> i32 {
 #[cfg(target_os = "windows")]
 fn run_empty_trash() -> i32 {
   Command::new("powershell")
+    .creation_flags(CREATE_NO_WINDOW)
     .args(["-NoProfile", "-Command", "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"])
     .status()
     .map(|s| s.code().unwrap_or(-1))
@@ -119,6 +161,7 @@ fn run_empty_trash() -> i32 {
 fn run_volume_up() -> (i32, bool, Option<String>) {
   (
     Command::new("powershell")
+      .creation_flags(CREATE_NO_WINDOW)
       .args([
         "-NoProfile",
         "-Command",
@@ -136,6 +179,7 @@ fn run_volume_up() -> (i32, bool, Option<String>) {
 fn run_volume_down() -> (i32, bool, Option<String>) {
   (
     Command::new("powershell")
+      .creation_flags(CREATE_NO_WINDOW)
       .args([
         "-NoProfile",
         "-Command",
@@ -152,6 +196,7 @@ fn run_volume_down() -> (i32, bool, Option<String>) {
 #[cfg(target_os = "windows")]
 fn run_volume_mute() -> (i32, bool, Option<String>) {
   match Command::new("powershell")
+    .creation_flags(CREATE_NO_WINDOW)
     .args([
       "-NoProfile",
       "-Command",
@@ -243,6 +288,7 @@ public static class AudioEndpointVolume {{
     scalar
   );
   match Command::new("powershell")
+    .creation_flags(CREATE_NO_WINDOW)
     .args(["-NoProfile", "-Command", &script])
     .status()
   {
@@ -255,6 +301,7 @@ public static class AudioEndpointVolume {{
 fn run_restart() -> (i32, bool, Option<String>) {
   (
     Command::new("shutdown")
+      .creation_flags(CREATE_NO_WINDOW)
       .args(["/r", "/t", "0"])
       .status()
       .map(|s| s.code().unwrap_or(-1))
@@ -268,6 +315,7 @@ fn run_restart() -> (i32, bool, Option<String>) {
 fn run_shutdown() -> (i32, bool, Option<String>) {
   (
     Command::new("shutdown")
+      .creation_flags(CREATE_NO_WINDOW)
       .args(["/s", "/t", "0"])
       .status()
       .map(|s| s.code().unwrap_or(-1))

@@ -10,6 +10,8 @@ use tauri::PhysicalSize;
 
 use tauri::Emitter;
 use tauri::Manager;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -24,8 +26,7 @@ fn move_palette_top_center(window: &tauri::WebviewWindow) {
 }
 
 fn main() {
-  // Super+Shift+K — палетка, Super+J — dashboard, Super+Shift+Comma — настройки
-  let toggle_shortcut = Shortcut::new(
+  let palette_shortcut = Shortcut::new(
     Some(Modifiers::SUPER | Modifiers::SHIFT),
     Code::KeyK,
   );
@@ -51,7 +52,7 @@ fn main() {
     .plugin(
       tauri_plugin_global_shortcut::Builder::new()
         .with_shortcuts([
-          toggle_shortcut.clone(),
+          palette_shortcut.clone(),
           dashboard_shortcut.clone(),
           settings_shortcut.clone(),
         ])
@@ -60,7 +61,7 @@ fn main() {
           if event.state != ShortcutState::Pressed {
             return;
           }
-          if shortcut == &toggle_shortcut {
+          if shortcut == &palette_shortcut {
             if let Some(window) = app.get_webview_window("main") {
               if window.is_visible().unwrap_or(false) {
                 let _ = window.hide();
@@ -122,6 +123,8 @@ fn main() {
       commands::snippets::update_snippet,
       commands::snippets::delete_snippet,
       commands::snippets::mark_snippet_used,
+      commands::system::exit_app,
+      commands::system::show_palette_or_toggle,
     ])
     .setup(|app| {
       db::initialize(&app.handle())?;
@@ -141,6 +144,52 @@ fn main() {
       app.manage(state);
 
       // Clipboard polling выполняется на фронте (readText + add_clipboard_entry), Rust polling отключён
+
+      // Трей: нативное меню (Show, Settings, Quit), иконка из бандла
+      let show_item = MenuItem::with_id(app, "tray-show", "Show Kikkō", true, None::<&str>)?;
+      let settings_item = MenuItem::with_id(app, "tray-settings", "Settings", true, None::<&str>)?;
+      let separator = PredefinedMenuItem::separator(app)?;
+      let quit_item = MenuItem::with_id(app, "tray-quit", "Quit", true, None::<&str>)?;
+      let menu = Menu::with_items(
+        app,
+        &[&show_item, &settings_item, &separator, &quit_item],
+      )?;
+      let show_id = show_item.id().clone();
+      let settings_id = settings_item.id().clone();
+      let quit_id = quit_item.id().clone();
+      let img = image::load_from_memory(include_bytes!("../icons/icon.png"))
+        .map_err(|e| e.to_string())?;
+      let rgba = img.to_rgba8();
+      let (w, h) = (rgba.width(), rgba.height());
+      let tray_icon = tauri::image::Image::new_owned(rgba.into_raw(), w, h);
+      let builder = {
+        let b = TrayIconBuilder::new()
+          .icon(tray_icon)
+          .menu(&menu)
+          .tooltip("Kikkō")
+          .on_menu_event(move |app, event| {
+            if event.id() == &show_id {
+              if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_size(PhysicalSize::new(760, 500));
+                move_palette_top_center(&w);
+                let _ = w.show();
+                let _ = w.set_focus();
+              }
+            } else if event.id() == &settings_id {
+              if let Some(w) = app.get_webview_window("main") {
+                let _ = w.emit("navigate-to", "/settings");
+                let _ = w.show();
+                let _ = w.set_focus();
+              }
+            } else if event.id() == &quit_id {
+              app.exit(0);
+            }
+          });
+        #[cfg(target_os = "macos")]
+        let b = b.menu_on_left_click(false);
+        b
+      };
+      builder.build(app)?;
 
       #[cfg(target_os = "macos")]
       {

@@ -66,7 +66,10 @@ interface SettingsState {
   removeAlias: (id: string) => void
 }
 
-type SettingsSnapshot = Pick<SettingsState, 'updatedAt' | 'general' | 'appearance' | 'clipboard' | 'hotkeys' | 'extensions' | 'aliases'>
+type SettingsSnapshot = Pick<
+  SettingsState,
+  'updatedAt' | 'general' | 'appearance' | 'clipboard' | 'hotkeys' | 'extensions' | 'aliases'
+>
 
 interface SettingsSyncPayload {
   source: string
@@ -75,7 +78,13 @@ interface SettingsSyncPayload {
 
 const defaultSettings: Omit<
   SettingsState,
-  'updateGeneral' | 'updateAppearance' | 'updateClipboard' | 'updateExtensions' | 'updateHotkeys' | 'upsertAlias' | 'removeAlias'
+  | 'updateGeneral'
+  | 'updateAppearance'
+  | 'updateClipboard'
+  | 'updateExtensions'
+  | 'updateHotkeys'
+  | 'upsertAlias'
+  | 'removeAlias'
 > = {
   updatedAt: 0,
   general: {
@@ -171,66 +180,66 @@ export const useSettingsStore = create<SettingsState>()(
         })
       }
 
-      return ({
-      ...defaultSettings,
-      updateGeneral: (patch) => {
-        set((state) => ({
-          updatedAt: Date.now(),
-          general: { ...state.general, ...patch },
-        }))
-        broadcast()
-      },
-      updateAppearance: (patch) => {
-        set((state) => ({
-          updatedAt: Date.now(),
-          appearance: { ...state.appearance, ...patch },
-        }))
-        broadcast()
-      },
-      updateClipboard: (patch) => {
-        set((state) => ({
-          updatedAt: Date.now(),
-          clipboard: { ...state.clipboard, ...patch },
-        }))
-        broadcast()
-      },
-      updateExtensions: (patch) => {
-        set((state) => ({
-          updatedAt: Date.now(),
-          extensions: { ...state.extensions, ...patch },
-        }))
-        broadcast()
-      },
-      updateHotkeys: (patch) => {
-        set((state) => ({
-          updatedAt: Date.now(),
-          hotkeys: { ...state.hotkeys, ...patch },
-        }))
-        broadcast()
-      },
-      upsertAlias: (rule) => {
-        set((state) => {
-          const normalizedAlias = rule.alias.trim().toLowerCase()
-          const next = state.aliases.filter((aliasRule) => aliasRule.id !== rule.id)
-          next.push({
-            ...rule,
-            alias: normalizedAlias,
-          })
-          return {
+      return {
+        ...defaultSettings,
+        updateGeneral: (patch) => {
+          set((state) => ({
             updatedAt: Date.now(),
-            aliases: next,
-          }
-        })
-        broadcast()
-      },
-      removeAlias: (id) => {
-        set((state) => ({
-          updatedAt: Date.now(),
-          aliases: state.aliases.filter((rule) => rule.id !== id),
-        }))
-        broadcast()
-      },
-      })
+            general: { ...state.general, ...patch },
+          }))
+          broadcast()
+        },
+        updateAppearance: (patch) => {
+          set((state) => ({
+            updatedAt: Date.now(),
+            appearance: { ...state.appearance, ...patch },
+          }))
+          broadcast()
+        },
+        updateClipboard: (patch) => {
+          set((state) => ({
+            updatedAt: Date.now(),
+            clipboard: { ...state.clipboard, ...patch },
+          }))
+          broadcast()
+        },
+        updateExtensions: (patch) => {
+          set((state) => ({
+            updatedAt: Date.now(),
+            extensions: { ...state.extensions, ...patch },
+          }))
+          broadcast()
+        },
+        updateHotkeys: (patch) => {
+          set((state) => ({
+            updatedAt: Date.now(),
+            hotkeys: { ...state.hotkeys, ...patch },
+          }))
+          broadcast()
+        },
+        upsertAlias: (rule) => {
+          set((state) => {
+            const normalizedAlias = rule.alias.trim().toLowerCase()
+            const next = state.aliases.filter((aliasRule) => aliasRule.id !== rule.id)
+            next.push({
+              ...rule,
+              alias: normalizedAlias,
+            })
+            return {
+              updatedAt: Date.now(),
+              aliases: next,
+            }
+          })
+          broadcast()
+        },
+        removeAlias: (id) => {
+          set((state) => ({
+            updatedAt: Date.now(),
+            aliases: state.aliases.filter((rule) => rule.id !== id),
+          }))
+          broadcast()
+        },
+      }
     },
     {
       name: 'kikko-settings',
@@ -241,7 +250,9 @@ export const useSettingsStore = create<SettingsState>()(
         return mergeWithDefaults(state)
       },
       merge: (persistedState, currentState) => {
-        const normalized = mergeWithDefaults(persistedState as Partial<SettingsSnapshot> | undefined)
+        const normalized = mergeWithDefaults(
+          persistedState as Partial<SettingsSnapshot> | undefined,
+        )
         return {
           ...currentState,
           ...normalized,

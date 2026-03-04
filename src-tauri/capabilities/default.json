@@ -22,6 +22,10 @@
     "fs:read-app-specific-dirs-recursive",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
-    "allow-app-invoke"
+    "allow-app-invoke",
+    "core:tray:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all"
   ]
 }

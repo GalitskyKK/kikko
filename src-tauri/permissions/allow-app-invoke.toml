@@ -25,5 +25,7 @@ commands.allow = [
   "update_snippet",
   "delete_snippet",
   "mark_snippet_used",
-  "open_path"
+  "open_path",
+  "exit_app",
+  "show_palette_or_toggle"
 ]

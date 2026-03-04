@@ -87,10 +87,24 @@ const SYSTEM_COMMANDS: Array<{
   },
 ]
 
+/** Паттерны для калькулятора: единицы (10 ft in m), % of, даты, timespan, математика */
 export function looksLikeMath(query: string): boolean {
   const trimmed = query.trim()
+  if (trimmed.length === 0) return false
   if (trimmed.startsWith('=')) return true
-  return /^[\d\s+\-*/().%\s]+$/.test(trimmed) && trimmed.length > 0
+  if (/\d+\s*%\s*of\s+/.test(trimmed)) return true
+  if (/\d+\s*(?:mins?|minutes?)\s+to\s+timespan$/i.test(trimmed)) return true
+  if (/days?\s+until\s+/i.test(trimmed)) return true
+  if (
+    /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+in\s+\d+\s+weeks?$/i.test(
+      trimmed,
+    )
+  )
+    return true
+  if (/^(square\s+root\s+of|\d+\s+power\s+\d+)/i.test(trimmed)) return true
+  if (/\d+\s*(?:ft|in|m|kg|lb|eur|usd|gbp|btc)\s+(?:to|in)\s+/i.test(trimmed)) return true
+  if (/^time\s+in\s+.+$/i.test(trimmed)) return true
+  return /^[\d\s+\-*/().%\s]+$/.test(trimmed)
 }
 
 export async function getSearchables(

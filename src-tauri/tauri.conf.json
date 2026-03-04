@@ -37,7 +37,8 @@
     "icon": [
       "icons/icon.png",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": ["icons/*", "../public/kikko-logo.png"]
   },
   "plugins": {
     "sql": {

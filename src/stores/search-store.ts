@@ -3,7 +3,16 @@ import { create } from 'zustand'
 interface SearchResult {
   id: string
   type: 'app' | 'file' | 'clipboard' | 'snippet' | 'command' | 'plugin' | 'calculator'
-  section?: 'suggestion' | 'command' | 'application' | 'preferences' | 'file' | 'plugin' | 'clipboard' | 'snippet' | 'calculator'
+  section?:
+    | 'suggestion'
+    | 'command'
+    | 'application'
+    | 'preferences'
+    | 'file'
+    | 'plugin'
+    | 'clipboard'
+    | 'snippet'
+    | 'calculator'
   title: string
   subtitle?: string
   icon?: string
