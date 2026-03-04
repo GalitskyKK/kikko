@@ -30,7 +30,7 @@ export type CalculatorOutput = CalculatorResult | CalculatorError
 /** "52% of 900" → (52/100)*900 */
 function tryPercentOf(trimmed: string): string | null {
   const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*%\s*of\s+(.+)$/i)
-  if (!match || match[2] === undefined) return null
+  if (match?.[2] === undefined) return null
   const pct = match[1]
   const rest = match[2].trim()
   return `(${pct}/100)*(${rest})`
@@ -39,7 +39,7 @@ function tryPercentOf(trimmed: string): string | null {
 /** "145 mins to timespan" / "90 minutes to timespan" → "2h 25m" */
 function tryMinsToTimespan(trimmed: string): string | null {
   const match = trimmed.match(/^(\d+)\s*(?:mins?|minutes?)\s+to\s+timespan$/i)
-  if (!match || match[1] === undefined) return null
+  if (match?.[1] === undefined) return null
   const totalMinutes = parseInt(match[1], 10)
   const start = 0
   const end = totalMinutes * 60 * 1000
@@ -50,7 +50,7 @@ function tryMinsToTimespan(trimmed: string): string | null {
 /** "days until 31 Mar" / "days until 2025-03-31" */
 function tryDaysUntil(trimmed: string): string | null {
   const match = trimmed.match(/^days?\s+until\s+(.+)$/i)
-  if (!match || match[1] === undefined) return null
+  if (match?.[1] === undefined) return null
   const dateStr = match[1].trim()
   const now = new Date()
   let target: Date
@@ -85,7 +85,7 @@ const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', '
 /** "time in tokyo" / "time in London" → current time in that timezone */
 function tryTimeInTimezone(trimmed: string): string | null {
   const match = trimmed.match(/^time\s+in\s+(.+)$/i)
-  if (!match || match[1] === undefined) return null
+  if (match?.[1] === undefined) return null
   const tz = match[1].trim()
   try {
     const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -104,7 +104,7 @@ function tryWeekdayInWeeks(trimmed: string): string | null {
   const match = trimmed.match(
     /^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+in\s+(\d+)\s+weeks?$/i,
   )
-  if (!match || match[1] === undefined || match[2] === undefined) return null
+  if (match?.[1] === undefined || match?.[2] === undefined) return null
   const weekday = match[1].toLowerCase()
   const weeks = parseInt(match[2], 10)
   const base = addWeeks(new Date(), weeks)
@@ -117,7 +117,7 @@ function tryWeekdayInWeeks(trimmed: string): string | null {
 
 /** square root of 625, 2 power 10 */
 function normalizeMathPhrases(expr: string): string {
-  let s = expr
+  const s = expr
     .replace(/\bsquare\s+root\s+of\s+(\d+(?:\.\d+)?)/gi, 'sqrt($1)')
     .replace(/\b(\d+(?:\.\d+)?)\s+power\s+(\d+)/gi, '$1^$2')
   return s
