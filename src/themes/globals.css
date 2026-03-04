@@ -1,0 +1,311 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 10px;
+    --palette-panel: 0 0% 100%;
+    --palette-panel-border: 240 5.9% 90%;
+    --palette-input-bg: 240 4.8% 95.9%;
+    --palette-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.15);
+    --glass-surface: 255 255 255;
+    --glass-opacity: 0.96;
+    --glass-border-opacity: 0.28;
+    --glass-shadow-opacity: 0.28;
+  }
+
+  .dark {
+    --background: 240 10% 6%;
+    --foreground: 0 0% 96%;
+    --card: 240 10% 8%;
+    --card-foreground: 0 0% 96%;
+    --popover: 240 10% 8%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 10% 6%;
+    --secondary: 240 8% 12%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 240 8% 12%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 240 8% 14%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 352 80% 55%;
+    --destructive-foreground: 0 0% 98%;
+    --warning: 43 96% 56%;
+    --border: 240 8% 16%;
+    --input: 240 8% 16%;
+    --ring: 0 0% 60%;
+    --radius: 12px;
+    --palette-panel: 240 10% 8%;
+    --palette-panel-border: 240 8% 16%;
+    --palette-input-bg: 0 0% 12%;
+    --palette-shadow: 0 24px 48px -12px rgba(0,0,0,0.5);
+    --glass-surface: 28 28 34;
+    --glass-opacity: 0.98;
+    --glass-border-opacity: 0.14;
+    --glass-shadow-opacity: 0.56;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  /* Окно на весь viewport — контент заполняет высоту окна Tauri */
+  html {
+    width: 100%;
+    height: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  body, #root {
+    width: 100%;
+    height: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  /* Raycast/Liquid Glass: system font stack, чёткая типографика */
+  body {
+    background: transparent;
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-family: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    overflow: hidden;
+  }
+  input, textarea {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.25);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  [cmdk-group-heading] {
+    padding: 8px 12px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  [cmdk-item] {
+    min-height: 40px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    color: inherit;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  [cmdk-item]:not([data-selected="true"]):hover {
+    background: hsl(var(--accent) / 0.86);
+    border-color: hsl(var(--ring) / 0.46);
+  }
+  [cmdk-item][data-selected="true"] {
+    background: hsl(var(--accent) / 0.98);
+    border-color: hsl(var(--ring) / 0.62);
+    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.48);
+  }
+  .dark [cmdk-item][data-selected="true"] {
+    background: linear-gradient(90deg, hsl(var(--accent) / 0.92) 0%, hsl(var(--accent) / 0.64) 100%);
+    border-color: hsl(var(--ring) / 0.36);
+  }
+  [cmdk-group] {
+    overflow: visible;
+  }
+  .density-compact [cmdk-item] {
+    min-height: 34px;
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+
+  /* Liquid Glass (Apple 2025–2026): полупрозрачность + размытие + глубина */
+  .liquid-glass-panel {
+    background: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 16px;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+  .dark .liquid-glass-panel {
+    background: rgba(30, 30, 35, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  /* Панель палетки: на весь экран, liquid glass без резких границ */
+  .palette-panel {
+    border-radius: 20px;
+    background: linear-gradient(
+      165deg,
+      rgba(255, 255, 255, 0.88) 0%,
+      rgba(251, 253, 255, 0.86) 50%,
+      rgba(248, 252, 255, 0.9) 100%
+    );
+    backdrop-filter: blur(28px) saturate(170%);
+    -webkit-backdrop-filter: blur(28px) saturate(170%);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.12),
+      0 12px 40px -8px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transition: box-shadow 0.2s ease;
+  }
+
+  .panel-glass {
+    background: linear-gradient(
+      165deg,
+      rgb(var(--glass-surface) / calc(var(--glass-opacity) + 0.02)) 0%,
+      rgb(var(--glass-surface) / var(--glass-opacity)) 100%
+    );
+    backdrop-filter: blur(26px) saturate(165%);
+    -webkit-backdrop-filter: blur(26px) saturate(165%);
+    box-shadow:
+      0 10px 30px -10px rgb(0 0 0 / var(--glass-shadow-opacity)),
+      inset 0 1px 0 rgb(255 255 255 / 0.18);
+  }
+  .dark .palette-panel {
+    background: linear-gradient(
+      165deg,
+      rgba(24, 24, 30, 0.96) 0%,
+      rgba(18, 18, 24, 0.98) 50%,
+      rgba(22, 22, 28, 0.96) 100%
+    );
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 20px 56px -12px rgba(0, 0, 0, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  /* Хедер Dashboard/Settings в том же стиле */
+  .glass-header {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.06) 0%,
+      transparent 100%
+    );
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  .reduce-motion-manual *,
+  .reduce-motion-manual *::before,
+  .reduce-motion-manual *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Оверлей: градиент + размытие, без резких краёв */
+  .liquid-glass-overlay {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.74) 0%,
+      rgba(247, 250, 255, 0.82) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+  .dark .liquid-glass-overlay {
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.55) 0%,
+      rgba(0, 0, 0, 0.65) 100%
+    );
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  :root[data-accent='default'] {
+    --ring: 240 5.9% 10%;
+    --accent: 240 4.8% 95.9%;
+  }
+  .dark:root[data-accent='default'] {
+    --ring: 0 0% 60%;
+    --accent: 240 8% 14%;
+  }
+
+  :root[data-accent='blue'] {
+    --ring: 217 92% 56%;
+    --accent: 214 100% 96%;
+  }
+  :root[data-accent='violet'] {
+    --ring: 262 82% 60%;
+    --accent: 264 84% 96%;
+  }
+  :root[data-accent='emerald'] {
+    --ring: 160 84% 38%;
+    --accent: 152 58% 94%;
+  }
+  :root[data-accent='rose'] {
+    --ring: 346 78% 52%;
+    --accent: 350 100% 97%;
+  }
+
+  .dark:root[data-accent='blue'] {
+    --ring: 214 95% 67%;
+    --accent: 220 52% 17%;
+  }
+  .dark:root[data-accent='violet'] {
+    --ring: 262 86% 72%;
+    --accent: 267 40% 18%;
+  }
+  .dark:root[data-accent='emerald'] {
+    --ring: 156 72% 56%;
+    --accent: 160 34% 17%;
+  }
+  .dark:root[data-accent='rose'] {
+    --ring: 346 78% 66%;
+    --accent: 346 36% 18%;
+  }
+}

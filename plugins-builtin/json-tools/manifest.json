@@ -1,0 +1,9 @@
+{
+  "id": "json-tools",
+  "name": "JSON Tools",
+  "version": "0.1.0",
+  "description": "Validate and pretty-print JSON.",
+  "author": "Kikko",
+  "commandsCount": 2,
+  "widgetsCount": 0
+}

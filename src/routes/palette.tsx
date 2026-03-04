@@ -1,0 +1,1377 @@
+import { AnimatePresence, motion } from 'framer-motion'
+import type React from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Command } from 'cmdk'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { AlertTriangle, AppWindow, ArrowLeft, Calculator, ClipboardList, Cog, FileText, LayoutDashboard, Plus, Search, SlidersHorizontal, Star, Pin, Trash2, Zap, Sparkles } from 'lucide-react'
+import { invoke } from '@tauri-apps/api/core'
+import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window'
+import { searchEngine } from '@/core/search/search-engine'
+import { getFileSearchables, getSearchables, looksLikeMath } from '@/core/search/search-sources'
+import { calculate } from '@/core/calculator/calculator-engine'
+import { ClipboardList as ClipboardEntriesList } from '@/components/clipboard/clipboard-list'
+import { ClipboardDetailPreview } from '@/components/clipboard/clipboard-preview'
+import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/ui/icon-button'
+import { Kbd } from '@/components/ui/kbd'
+import {
+  PALETTE_HEIGHT_EXPANDED_PX,
+  PALETTE_TOP_PADDING_PX,
+  PALETTE_WIDTH_PX,
+  SEARCH_RESULTS_LIMIT,
+} from '@/lib/constants'
+import { STRINGS } from '@/lib/strings'
+import { setLastClipboardContent } from '@/lib/clipboard-polling'
+import { isTauriRuntime } from '@/lib/tauri'
+import { openDashboardWindow, openSettingsWindow } from '@/lib/window-navigation'
+import { useClipboardStore, type ClipboardEntry } from '@/stores/clipboard-store'
+import { useInstalledAppsStore } from '@/stores/installed-apps-store'
+import { useSearchStore, type SearchResult } from '@/stores/search-store'
+import { useSettingsStore } from '@/stores/settings-store'
+import { useSnippetStore } from '@/stores/snippet-store'
+import { cn } from '@/utils/cn'
+
+type PaletteMode = 'search' | 'clipboard' | 'snippets' | 'calculator'
+type PaletteView = 'results' | 'actions'
+type ClipboardTypeFilter = 'all' | 'text' | 'link' | 'image' | 'file' | 'code'
+type GroupedResults = Record<'command' | 'application' | 'preferences' | 'file' | 'plugin' | 'clipboard' | 'snippet' | 'calculator', SearchResult[]>
+type PaletteAction = {
+  id: string
+  label: string
+  icon: React.ComponentType<{ className?: string }>
+  onSelect: () => void
+}
+
+export function PalettePage() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [mode, setMode] = useState<PaletteMode>('search')
+  const [query, setQuery] = useState('')
+  const [selectedClipboardId, setSelectedClipboardId] = useState<string | null>(null)
+  const [selectedSnippetId, setSelectedSnippetId] = useState<string | null>(null)
+  const [paletteView, setPaletteView] = useState<PaletteView>('results')
+  const [clipboardTypeFilter, setClipboardTypeFilter] = useState<ClipboardTypeFilter>('all')
+  const [pendingDangerousResult, setPendingDangerousResult] = useState<SearchResult | null>(null)
+  const [selectedCommandValue, setSelectedCommandValue] = useState('')
+  const [selectedActionIndex, setSelectedActionIndex] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const searchRequestIdRef = useRef(0)
+  const geometryRequestIdRef = useRef(0)
+
+  const { results, setResults, setLoading, isLoading } = useSearchStore()
+  const showStartSuggestions = useSettingsStore((state) => state.general.showStartSuggestions)
+  const closeOnEscape = useSettingsStore((state) => state.general.closeOnEscape)
+  const showAppIcons = useSettingsStore((state) => state.appearance.showAppIcons)
+  const enabledExtensions = useSettingsStore((state) => state.extensions ?? {
+    clipboard: true,
+    snippets: true,
+    calculator: true,
+    dashboard: true,
+  })
+  const {
+    entries: clipboardEntries,
+    loadFromBackend: loadClipboard,
+    isLoading: clipboardLoading,
+    toggleFavoriteInBackend,
+    togglePinnedInBackend,
+    deleteInBackend,
+    clearInBackend,
+    writeInBackend,
+  } = useClipboardStore()
+  const snippets = useSnippetStore((state) => state.snippets)
+  const markSnippetUsed = useSnippetStore((state) => state.markSnippetUsed)
+
+  const hideWindow = useCallback(() => {
+    if (!isTauriRuntime()) return
+    void getCurrentWindow().hide()
+  }, [])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    useSearchStore.getState().reset()
+  }, [])
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return
+    void useInstalledAppsStore.getState().loadApps()
+    void loadClipboard()
+    void useSnippetStore.getState().loadFromBackend()
+  }, [loadClipboard])
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return
+    let isDisposed = false
+    let unlisten: (() => void) | null = null
+    void import('@tauri-apps/api/event').then(({ listen }) => {
+      return listen('kikko:snippets-updated', () => {
+        void useSnippetStore.getState().loadFromBackend()
+      })
+    }).then((cleanup) => {
+      if (isDisposed) {
+        cleanup()
+        return
+      }
+      unlisten = cleanup
+    }).catch(() => {})
+    return () => {
+      isDisposed = true
+      if (unlisten) unlisten()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (mode === 'clipboard' && isTauriRuntime()) {
+      void loadClipboard()
+    }
+  }, [mode, loadClipboard])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('mode') === 'clipboard') {
+      setMode('clipboard')
+      return
+    }
+    if (params.get('mode') === 'search') {
+      setMode('search')
+    }
+  }, [location.search])
+
+  useEffect(() => {
+    if (mode !== 'clipboard') {
+      setPaletteView('results')
+      return
+    }
+    if (query.trim() !== '') {
+      setPaletteView('results')
+    }
+  }, [mode, query])
+
+  useEffect(() => {
+    setSelectedActionIndex(0)
+  }, [paletteView])
+
+  const runSearch = useCallback(
+    (value: string) => {
+      const requestId = ++searchRequestIdRef.current
+      setLoading(true)
+      const queryLower = value.trim().toLowerCase()
+      getSearchables(value, { navigate, hideWindow })
+        .then((searchables) => {
+          if (requestId !== searchRequestIdRef.current) return
+          if (value.trim() === '') {
+            const initialResults = composeSearchResultsBySection(
+              searchEngine.search('', searchables, { cacheKey: 'initial' }),
+              '',
+              SEARCH_RESULTS_LIMIT,
+            )
+            setResults(initialResults)
+            setLoading(false)
+            return
+          }
+          let list = searchEngine.search(value, searchables, { cacheKey: 'fast' })
+          const quickActions: Array<{
+            id: string
+            type: 'clipboard' | 'calculator' | 'snippet' | 'command'
+            section: 'clipboard' | 'calculator' | 'snippet' | 'command' | 'preferences'
+            title: string
+            subtitle: string
+            score: number
+            action: () => void
+          }> = []
+
+          if (enabledExtensions.clipboard && matchesQuick(queryLower, STRINGS.palette.clipboardHistory, ['clipboard', 'clip', 'history'])) {
+            quickActions.push({
+              id: 'quick-clipboard',
+              type: 'clipboard',
+              section: 'clipboard',
+              title: STRINGS.palette.clipboardHistory,
+              subtitle: 'Kikkō',
+              score: 0.95,
+              action: () => setMode('clipboard'),
+            })
+          }
+          if (enabledExtensions.calculator && matchesQuick(queryLower, STRINGS.palette.calculator, ['calc', 'calculator'])) {
+            quickActions.push({
+              id: 'quick-calc',
+              type: 'calculator',
+              section: 'calculator',
+              title: STRINGS.palette.calculator,
+              subtitle: 'Kikkō',
+              score: 0.95,
+              action: () => setMode('calculator'),
+            })
+          }
+          if (enabledExtensions.snippets && matchesQuick(queryLower, STRINGS.palette.snippets, ['snippet', 'snippets'])) {
+            quickActions.push({
+              id: 'quick-snippets',
+              type: 'snippet',
+              section: 'snippet',
+              title: STRINGS.palette.snippets,
+              subtitle: 'Kikkō',
+              score: 0.95,
+              action: () => setMode('snippets'),
+            })
+          }
+          if (enabledExtensions.dashboard && matchesQuick(queryLower, STRINGS.palette.dashboard, ['dashboard', 'dash'])) {
+            quickActions.push({
+              id: 'quick-dashboard',
+              type: 'command',
+              section: 'command',
+              title: STRINGS.palette.dashboard,
+              subtitle: 'Kikkō',
+              score: 0.95,
+              action: () => {
+                void openDashboardWindow()
+                hideWindow()
+              },
+            })
+          }
+          if (matchesQuick(queryLower, STRINGS.palette.settings, ['settings', 'preferences'])) {
+            quickActions.push({
+              id: 'quick-settings',
+              type: 'command',
+              section: 'preferences',
+              title: STRINGS.palette.settings,
+              subtitle: 'Kikkō',
+              score: 0.95,
+              action: () => {
+                void openSettingsWindow()
+                hideWindow()
+              },
+            })
+          }
+
+          if (looksLikeMath(value)) {
+            const calc = calculate(value)
+            if (calc.success) {
+              list = [
+                {
+                  id: 'calc-result',
+                  type: 'calculator' as const,
+                  section: 'calculator' as const,
+                  title: `= ${calc.value}`,
+                  subtitle: calc.expression,
+                  score: 1,
+                  action: () => {
+                    if (!isTauriRuntime()) return
+                    setLastClipboardContent(calc.value)
+                    void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(calc.value))
+                    hideWindow()
+                  },
+                },
+                ...list,
+              ]
+            }
+          }
+
+          const fastResults = composeSearchResultsBySection([...quickActions, ...list], value, SEARCH_RESULTS_LIMIT)
+          setResults(fastResults)
+          if (value.trim().length < 2) {
+            setLoading(false)
+            return
+          }
+
+          void getFileSearchables(value, { hideWindow })
+            .then((fileSearchables) => {
+              if (requestId !== searchRequestIdRef.current) return
+              if (fileSearchables.length === 0) {
+                setLoading(false)
+                return
+              }
+              const combined = [...searchables, ...fileSearchables]
+              list = searchEngine.search(value, combined, { cacheKey: 'full' })
+              setResults(composeSearchResultsBySection([...quickActions, ...list], value, SEARCH_RESULTS_LIMIT))
+              setLoading(false)
+            })
+            .catch(() => {
+              if (requestId !== searchRequestIdRef.current) return
+              setLoading(false)
+            })
+        })
+        .catch(() => {
+          if (requestId !== searchRequestIdRef.current) return
+          setResults([])
+          setLoading(false)
+        })
+    },
+    [enabledExtensions.calculator, enabledExtensions.clipboard, enabledExtensions.dashboard, enabledExtensions.snippets, hideWindow, navigate, setLoading, setResults],
+  )
+
+  const handleValueChange = useCallback(
+    (value: string) => {
+      setQuery(value)
+      runSearch(value)
+    },
+    [runSearch],
+  )
+
+  useEffect(() => {
+    if (mode !== 'search') return
+    if (query.trim() !== '') return
+    runSearch('')
+  }, [mode, query, runSearch])
+
+  const goBack = useCallback(() => {
+    if (mode !== 'search') {
+      setMode('search')
+      setQuery('')
+      return
+    }
+    hideWindow()
+  }, [hideWindow, mode])
+
+  const isClipboardMode = mode === 'clipboard'
+  const isSnippetsMode = mode === 'snippets'
+  const isRootMode = mode === 'search'
+  const isEmptyQuery = query.trim() === ''
+  const shouldShowStartSuggestions = isRootMode && isEmptyQuery && showStartSuggestions && !isLoading
+  const isActionsView = paletteView === 'actions'
+
+  const applyPaletteGeometry = useCallback(() => {
+    if (!isTauriRuntime()) return
+    const requestId = ++geometryRequestIdRef.current
+    const height = PALETTE_HEIGHT_EXPANDED_PX
+    const currentWindow = getCurrentWindow()
+    void (async () => {
+      await currentWindow.setSize(new LogicalSize(PALETTE_WIDTH_PX, height))
+      if (requestId !== geometryRequestIdRef.current) return
+      const monitor = await currentMonitor()
+      if (!monitor) return
+      if (requestId !== geometryRequestIdRef.current) return
+      const x = Math.max(Math.floor((monitor.size.width - PALETTE_WIDTH_PX) / 2), 0)
+      await currentWindow.setPosition(new PhysicalPosition(x, PALETTE_TOP_PADDING_PX))
+    })()
+  }, [])
+
+  useEffect(() => {
+    applyPaletteGeometry()
+    return () => {
+      geometryRequestIdRef.current += 1
+    }
+  }, [applyPaletteGeometry])
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return
+    let isDisposed = false
+    let unlistenFocus: (() => void) | null = null
+    const currentWindow = getCurrentWindow()
+    const unlistenPromise = currentWindow.onFocusChanged(({ payload }) => {
+      if (!payload) return
+      applyPaletteGeometry()
+      void useSnippetStore.getState().loadFromBackend()
+      if (mode === 'search') {
+        runSearch(query)
+      }
+    })
+    void unlistenPromise.then((fn) => {
+      if (isDisposed) {
+        fn()
+        return
+      }
+      unlistenFocus = fn
+    })
+    return () => {
+      isDisposed = true
+      if (unlistenFocus) unlistenFocus()
+    }
+  }, [applyPaletteGeometry, mode, query, runSearch])
+
+  const clipboardFiltered = useMemo(() => {
+    if (!isClipboardMode) return []
+    const normalizedQuery = query.trim().toLowerCase()
+    const byType = clipboardEntries.filter((entry) => matchesClipboardType(entry, clipboardTypeFilter))
+    if (!normalizedQuery) return byType.slice(0, 500)
+    return byType
+      .filter((entry) => entry.preview.toLowerCase().includes(normalizedQuery) || entry.content.toLowerCase().includes(normalizedQuery))
+      .slice(0, 500)
+  }, [clipboardEntries, clipboardTypeFilter, isClipboardMode, query])
+
+  const snippetsFiltered = useMemo(() => {
+    if (!isSnippetsMode) return []
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return snippets.slice(0, 300)
+    return snippets.filter((snippet) => (
+      snippet.name.toLowerCase().includes(normalized)
+      || snippet.keyword.toLowerCase().includes(normalized)
+      || snippet.content.toLowerCase().includes(normalized)
+    ))
+  }, [isSnippetsMode, query, snippets])
+
+  useEffect(() => {
+    if (!isClipboardMode || clipboardFiltered.length === 0) {
+      setSelectedClipboardId(null)
+      return
+    }
+    setSelectedClipboardId((current) => current ?? clipboardFiltered[0]?.id ?? null)
+  }, [clipboardFiltered, isClipboardMode])
+
+  useEffect(() => {
+    if (!isSnippetsMode || snippetsFiltered.length === 0) {
+      setSelectedSnippetId(null)
+      return
+    }
+    setSelectedSnippetId((current) => current ?? snippetsFiltered[0]?.id ?? null)
+  }, [isSnippetsMode, snippetsFiltered])
+
+  const copyAndClose = useCallback(
+    (entry: ClipboardEntry) => {
+      if (!isTauriRuntime()) return
+      if (entry.contentType === 'text') {
+        setLastClipboardContent(entry.content)
+      }
+      void writeInBackend(entry.id)
+      hideWindow()
+    },
+    [hideWindow, writeInBackend],
+  )
+
+  const selectedClipboardEntry = useMemo(
+    () => clipboardFiltered.find((entry) => entry.id === selectedClipboardId) ?? null,
+    [clipboardFiltered, selectedClipboardId],
+  )
+  const selectedSnippetEntry = useMemo(
+    () => snippetsFiltered.find((snippet) => snippet.id === selectedSnippetId) ?? null,
+    [selectedSnippetId, snippetsFiltered],
+  )
+
+  const clipboardActions = useMemo<PaletteAction[]>(() => {
+    if (!selectedClipboardEntry) return []
+    const actions: PaletteAction[] = [
+      {
+        id: 'paste',
+        label: STRINGS.palette.actionPaste,
+        icon: ClipboardList,
+        onSelect: () => {
+          copyAndClose(selectedClipboardEntry)
+          setPaletteView('results')
+        },
+      },
+      {
+        id: 'pin',
+        label: selectedClipboardEntry.isPinned ? STRINGS.palette.actionUnpin : STRINGS.palette.actionPin,
+        icon: Pin,
+        onSelect: () => void togglePinnedInBackend(selectedClipboardEntry.id),
+      },
+      {
+        id: 'favorite',
+        label: selectedClipboardEntry.isFavorite ? STRINGS.palette.actionUnfavorite : STRINGS.palette.actionFavorite,
+        icon: Star,
+        onSelect: () => void toggleFavoriteInBackend(selectedClipboardEntry.id),
+      },
+      {
+        id: 'delete',
+        label: STRINGS.palette.actionDelete,
+        icon: Trash2,
+        onSelect: () => {
+          void deleteInBackend(selectedClipboardEntry.id)
+          setPaletteView('results')
+        },
+      },
+      {
+        id: 'clear',
+        label: STRINGS.palette.actionClearHistory,
+        icon: Trash2,
+        onSelect: () => {
+          void clearInBackend()
+          setPaletteView('results')
+        },
+      },
+    ]
+    return actions
+  }, [clearInBackend, copyAndClose, deleteInBackend, selectedClipboardEntry, toggleFavoriteInBackend, togglePinnedInBackend])
+
+  const groupedResults = useMemo(() => groupSearchResults(results), [results])
+
+  const startSuggestions = useMemo(
+    () => [
+      ...(enabledExtensions.clipboard
+        ? [{
+          id: 'start-clipboard',
+          title: STRINGS.palette.clipboardHistory,
+          subtitle: 'Kikkō',
+          icon: ClipboardList,
+          iconClassName: 'text-sky-500 dark:text-sky-400',
+          action: () => setMode('clipboard'),
+        }]
+        : []),
+      {
+        id: 'start-settings',
+        title: STRINGS.palette.settings,
+        subtitle: 'Kikkō',
+        icon: Cog,
+        iconClassName: 'text-violet-500 dark:text-violet-400',
+        action: () => {
+          void openSettingsWindow()
+          hideWindow()
+        },
+      },
+      ...(enabledExtensions.dashboard
+        ? [{
+          id: 'start-dashboard',
+          title: STRINGS.palette.dashboard,
+          subtitle: 'Kikkō',
+          icon: LayoutDashboard,
+          iconClassName: 'text-amber-500 dark:text-amber-400',
+          action: () => {
+            void openDashboardWindow()
+            hideWindow()
+          },
+        }]
+        : []),
+      ...(enabledExtensions.snippets
+        ? [{
+          id: 'start-snippets',
+          title: STRINGS.palette.snippets,
+          subtitle: 'Kikkō',
+          icon: FileText,
+          iconClassName: 'text-emerald-500 dark:text-emerald-400',
+          action: () => setMode('snippets'),
+        }]
+        : []),
+      ...(enabledExtensions.calculator
+        ? [{
+          id: 'start-calculator',
+          title: STRINGS.palette.calculator,
+          subtitle: 'Kikkō',
+          icon: Calculator,
+          iconClassName: 'text-rose-500 dark:text-rose-400',
+          action: () => setMode('calculator'),
+        }]
+        : []),
+    ],
+    [enabledExtensions.calculator, enabledExtensions.clipboard, enabledExtensions.dashboard, enabledExtensions.snippets, hideWindow],
+  )
+
+  const [selectionScrollSignal, setSelectionScrollSignal] = useState(0)
+
+  const selectedSearchResult = useMemo(() => {
+    const selectedResultId = extractCommandEntityId(selectedCommandValue, 'result')
+    if (selectedResultId) {
+      return results.find((result) => result.id === selectedResultId) ?? null
+    }
+    return results[0] ?? null
+  }, [results, selectedCommandValue])
+
+  const selectedStartSuggestion = useMemo(() => {
+    const selectedSuggestionId = extractCommandEntityId(selectedCommandValue, 'suggestion')
+    if (selectedSuggestionId) {
+      return startSuggestions.find((suggestion) => suggestion.id === selectedSuggestionId) ?? null
+    }
+    return startSuggestions[0] ?? null
+  }, [selectedCommandValue, startSuggestions])
+
+  const copyTextToClipboard = useCallback((value: string) => {
+    if (!value.trim()) return
+    if (isTauriRuntime()) {
+      void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(value))
+      return
+    }
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(value)
+    }
+  }, [])
+
+  const runResultAction = useCallback((result: SearchResult) => {
+    result.action()
+    setPaletteView('results')
+  }, [])
+
+  const selectSearchResult = useCallback((result: SearchResult) => {
+    if (isDangerousCommand(result)) {
+      setPendingDangerousResult(result)
+      return
+    }
+    runResultAction(result)
+  }, [runResultAction])
+
+  const searchActions = useMemo<PaletteAction[]>(() => {
+    if (selectedSearchResult) {
+      const actions: PaletteAction[] = [
+        {
+          id: 'result-open',
+          label: STRINGS.palette.openCommand,
+          icon: Zap,
+          onSelect: () => {
+            selectSearchResult(selectedSearchResult)
+          },
+        },
+        {
+          id: 'result-copy-title',
+          label: 'Copy title',
+          icon: ClipboardList,
+          onSelect: () => copyTextToClipboard(selectedSearchResult.title),
+        },
+      ]
+      if (selectedSearchResult.subtitle) {
+        actions.push({
+          id: 'result-copy-subtitle',
+          label: 'Copy details',
+          icon: FileText,
+          onSelect: () => copyTextToClipboard(selectedSearchResult.subtitle ?? ''),
+        })
+      }
+      return actions
+    }
+
+    if (!selectedStartSuggestion) return []
+    return [
+      {
+        id: 'suggestion-open',
+        label: STRINGS.palette.openCommand,
+        icon: Zap,
+        onSelect: () => {
+          selectedStartSuggestion.action()
+          setPaletteView('results')
+        },
+      },
+      {
+        id: 'suggestion-copy-title',
+        label: 'Copy title',
+        icon: ClipboardList,
+        onSelect: () => copyTextToClipboard(selectedStartSuggestion.title),
+      },
+    ]
+  }, [copyTextToClipboard, selectSearchResult, selectedSearchResult, selectedStartSuggestion])
+
+  const snippetActions = useMemo<PaletteAction[]>(() => {
+    if (!selectedSnippetEntry) return []
+    return [
+      {
+        id: 'snippet-paste',
+        label: STRINGS.palette.actionPaste,
+        icon: ClipboardList,
+        onSelect: () => {
+          if (!isTauriRuntime()) return
+          void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(selectedSnippetEntry.content))
+          void markSnippetUsed(selectedSnippetEntry.id)
+          hideWindow()
+        },
+      },
+      {
+        id: 'snippet-copy-name',
+        label: 'Copy snippet name',
+        icon: FileText,
+        onSelect: () => copyTextToClipboard(selectedSnippetEntry.name),
+      },
+    ]
+  }, [copyTextToClipboard, hideWindow, markSnippetUsed, selectedSnippetEntry])
+
+  const activeActions = isClipboardMode ? clipboardActions : isSnippetsMode ? snippetActions : searchActions
+
+  const toggleActionsView = useCallback(() => {
+    if (activeActions.length === 0) return
+    setPaletteView((value) => {
+      const next = value === 'actions' ? 'results' : 'actions'
+      if (next === 'actions') {
+        setSelectedActionIndex(0)
+      }
+      return next
+    })
+  }, [activeActions.length])
+
+  const commandExplainText = useMemo(() => {
+    if (!selectedSearchResult) return ''
+    const queryLower = query.trim().toLowerCase()
+    if (!queryLower) return 'Top result by base relevance and type priority'
+    if (selectedSearchResult.alias?.toLowerCase() === queryLower) {
+      return `Matched alias "${selectedSearchResult.alias}"`
+    }
+    if (selectedSearchResult.title.toLowerCase().startsWith(queryLower)) {
+      return 'Title prefix match'
+    }
+    return 'Matched by title/keywords relevance'
+  }, [query, selectedSearchResult])
+
+  useEffect(() => {
+    if (mode !== 'search') {
+      setSelectedCommandValue('')
+      return
+    }
+    const hasSelectedResult = Boolean(
+      extractCommandEntityId(selectedCommandValue, 'result')
+      && results.some((result) => result.id === extractCommandEntityId(selectedCommandValue, 'result')),
+    )
+    const hasSelectedSuggestion = Boolean(
+      extractCommandEntityId(selectedCommandValue, 'suggestion')
+      && startSuggestions.some((item) => item.id === extractCommandEntityId(selectedCommandValue, 'suggestion')),
+    )
+    if (hasSelectedResult || hasSelectedSuggestion) {
+      return
+    }
+    const topResult = results[0]
+    if (topResult) {
+      setSelectedCommandValue(`result:${topResult.id}`)
+      return
+    }
+    const topSuggestion = startSuggestions[0]
+    if (shouldShowStartSuggestions && topSuggestion) {
+      setSelectedCommandValue(`suggestion:${topSuggestion.id}`)
+      return
+    }
+    setSelectedCommandValue('')
+  }, [mode, results, selectedCommandValue, shouldShowStartSuggestions, startSuggestions])
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (pendingDangerousResult) {
+          setPendingDangerousResult(null)
+          return
+        }
+        if (query.trim() !== '') {
+          setQuery('')
+          if (mode === 'search') {
+            runSearch('')
+          }
+          return
+        }
+        if (mode !== 'search' || isActionsView) {
+          setPaletteView('results')
+          setMode('search')
+          return
+        }
+        if (!closeOnEscape) return
+        hideWindow()
+        return
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        toggleActionsView()
+        return
+      }
+      if (isActionsView) {
+        if (activeActions.length === 0) {
+          setPaletteView('results')
+          return
+        }
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          setSelectedActionIndex((index) => (index + 1) % activeActions.length)
+          return
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault()
+          setSelectedActionIndex((index) => (index <= 0 ? activeActions.length - 1 : index - 1))
+          return
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          activeActions[selectedActionIndex]?.onSelect()
+          setPaletteView('results')
+          return
+        }
+        return
+      }
+      if (isSnippetsMode && snippetsFiltered.length > 0) {
+        const currentIndex = snippetsFiltered.findIndex((snippet) => snippet.id === selectedSnippetId)
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          const nextIndex = currentIndex >= snippetsFiltered.length - 1 ? 0 : currentIndex + 1
+          const nextId = snippetsFiltered[nextIndex]?.id
+          if (nextId) setSelectedSnippetId(nextId)
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault()
+          const nextIndex = currentIndex <= 0 ? snippetsFiltered.length - 1 : currentIndex - 1
+          const nextId = snippetsFiltered[nextIndex]?.id
+          if (nextId) setSelectedSnippetId(nextId)
+        }
+        if (event.key === 'Enter' && selectedSnippetId) {
+          event.preventDefault()
+          const selectedSnippet = snippetsFiltered.find((snippet) => snippet.id === selectedSnippetId)
+          if (selectedSnippet && isTauriRuntime()) {
+            void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(selectedSnippet.content))
+            void markSnippetUsed(selectedSnippet.id)
+            hideWindow()
+          }
+        }
+        return
+      }
+      if (!isClipboardMode || clipboardFiltered.length === 0) return
+
+      const currentIndex = clipboardFiltered.findIndex((entry) => entry.id === selectedClipboardId)
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        const nextIndex = currentIndex >= clipboardFiltered.length - 1 ? 0 : currentIndex + 1
+        const nextId = clipboardFiltered[nextIndex]?.id
+        if (nextId) {
+          setSelectedClipboardId(nextId)
+          setSelectionScrollSignal((value) => value + 1)
+        }
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        const nextIndex = currentIndex <= 0 ? clipboardFiltered.length - 1 : currentIndex - 1
+        const nextId = clipboardFiltered[nextIndex]?.id
+        if (nextId) {
+          setSelectedClipboardId(nextId)
+          setSelectionScrollSignal((value) => value + 1)
+        }
+      }
+      if (event.key === 'Enter' && selectedClipboardId) {
+        event.preventDefault()
+        const selectedEntry = clipboardFiltered.find((entry) => entry.id === selectedClipboardId)
+        if (selectedEntry) {
+          copyAndClose(selectedEntry)
+        }
+      }
+    },
+    [activeActions, clipboardFiltered, closeOnEscape, copyAndClose, hideWindow, isActionsView, isClipboardMode, isSnippetsMode, markSnippetUsed, mode, pendingDangerousResult, query, runSearch, selectedActionIndex, selectedClipboardId, selectedSnippetId, snippetsFiltered, toggleActionsView],
+  )
+
+  return (
+    <div className="flex h-full min-h-dvh w-full flex-col" onKeyDownCapture={handleKeyDown}>
+      <Command
+        className={cn(
+          'palette-panel relative flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden rounded-none',
+        )}
+        shouldFilter={false}
+        value={selectedCommandValue}
+        onValueChange={setSelectedCommandValue}
+      >
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/70 px-3 py-3">
+          {isRootMode ? (
+            <img
+              src="/kikko-logo.png"
+              alt="Kikko"
+              className="h-5 w-5 shrink-0 opacity-95"
+              onError={(event) => {
+                event.currentTarget.src = '/vite.svg'
+              }}
+            />
+          ) : (
+            <IconButton
+              size="sm"
+              onClick={goBack}
+              aria-label={STRINGS.palette.back}
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+            </IconButton>
+          )}
+          {!isRootMode && <Search className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />}
+          <Command.Input
+            ref={inputRef}
+            value={query}
+            onValueChange={handleValueChange}
+            placeholder={isClipboardMode ? STRINGS.palette.filterPlaceholder : STRINGS.palette.placeholder}
+            className="h-10 flex-1 bg-transparent text-[15px] text-foreground placeholder:text-muted-foreground outline-none"
+          />
+          {isClipboardMode && (
+            <label className="inline-flex h-8 items-center gap-2 rounded-md border border-border/70 bg-background/70 px-2 text-xs text-foreground/90">
+              <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              <select
+                value={clipboardTypeFilter}
+                onChange={(event) => setClipboardTypeFilter(event.target.value as ClipboardTypeFilter)}
+                className="bg-transparent text-xs outline-none"
+              >
+                <option value="all">All Types</option>
+                <option value="text">Text</option>
+                <option value="link">Links</option>
+                <option value="image">Images</option>
+                <option value="file">Files</option>
+                <option value="code">Code</option>
+              </select>
+            </label>
+          )}
+        </div>
+
+        <Command.List
+          className={cn(
+            'px-2 py-2',
+            'flex-1 min-h-0 overflow-y-auto pb-14',
+          )}
+        >
+          {pendingDangerousResult && (
+            <div className="mb-2 rounded-lg border border-warning/45 bg-warning/10 px-3 py-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-foreground">Confirm critical command</p>
+                  <p className="text-xs text-muted-foreground">{pendingDangerousResult.title}</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Button size="sm" variant="muted" className="h-7 px-2 text-[11px]" onClick={() => {
+                    runResultAction(pendingDangerousResult)
+                    setPendingDangerousResult(null)
+                  }}
+                  >
+                    Run
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={() => setPendingDangerousResult(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+          {isClipboardMode && !isActionsView && (
+            <>
+              {clipboardLoading && <div className="py-4 text-center text-sm text-muted-foreground">{STRINGS.palette.loading}</div>}
+              {!clipboardLoading && clipboardFiltered.length === 0 && (
+                <div className="py-8 text-center text-sm text-muted-foreground">{STRINGS.palette.clipboardEmpty}</div>
+              )}
+              {!clipboardLoading && clipboardFiltered.length > 0 && (
+                <div className="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_300px]">
+                  <ClipboardEntriesList
+                    entries={clipboardFiltered}
+                    selectedId={selectedClipboardId}
+                    scrollToSelectedSignal={selectionScrollSignal}
+                    onSelect={copyAndClose}
+                    onToggleFavorite={(entryId) => void toggleFavoriteInBackend(entryId)}
+                    onTogglePinned={(entryId) => void togglePinnedInBackend(entryId)}
+                    onDelete={(entryId) => void deleteInBackend(entryId)}
+                  />
+                  <ClipboardDetailPreview entry={selectedClipboardEntry} />
+                </div>
+              )}
+            </>
+          )}
+
+          {isSnippetsMode && !isActionsView && (
+            <>
+              {snippetsFiltered.length === 0 && (
+                <div className="flex flex-col items-center gap-3 py-8 text-center text-sm text-muted-foreground">
+                  <p>No snippets found.</p>
+                  <Button
+                    size="sm"
+                    variant="muted"
+                    className="gap-2"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
+                      }
+                      void openSettingsWindow()
+                      hideWindow()
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    Create snippet
+                  </Button>
+                </div>
+              )}
+              {snippetsFiltered.length > 0 && (
+                <Command.Group heading={STRINGS.palette.snippets}>
+                  {snippetsFiltered.map((snippet) => (
+                    <Command.Item
+                      key={snippet.id}
+                      value={`snippet-entry:${snippet.id}`}
+                      onSelect={() => {
+                        if (!isTauriRuntime()) return
+                        void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(snippet.content))
+                        void markSnippetUsed(snippet.id)
+                        hideWindow()
+                      }}
+                      className={cn('flex cursor-pointer items-center gap-3 text-sm text-foreground', selectedSnippetId === snippet.id && 'data-[selected=true]:bg-accent')}
+                    >
+                      <FileText className="h-4 w-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
+                      <span className="min-w-0 flex-1 truncate">{snippet.name}</span>
+                      <span className="max-w-[220px] shrink-0 truncate text-xs text-muted-foreground">{snippet.keyword}</span>
+                    </Command.Item>
+                  ))}
+                </Command.Group>
+              )}
+            </>
+          )}
+
+          {isRootMode && isLoading && <div className="py-4 text-center text-sm text-muted-foreground">{STRINGS.palette.searching}</div>}
+
+          {isRootMode && shouldShowStartSuggestions && (
+            <Command.Group heading={STRINGS.palette.startSuggestions}>
+              {startSuggestions.map((item) => (
+                <Command.Item key={item.id} value={`suggestion:${item.id}`} onSelect={item.action} className="flex cursor-pointer items-center gap-3 text-sm text-foreground">
+                  <item.icon className={cn('h-4 w-4 shrink-0', item.iconClassName)} aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                  <span className="max-w-[160px] shrink-0 truncate text-xs text-muted-foreground">{item.subtitle}</span>
+                </Command.Item>
+              ))}
+            </Command.Group>
+          )}
+
+          {isRootMode && !isLoading && (
+            <>
+              {results.length === 0 && !shouldShowStartSuggestions && (
+                <Command.Empty className="py-8 text-center text-sm text-muted-foreground">{STRINGS.palette.empty}</Command.Empty>
+              )}
+              {results.length > 0 && (
+                GROUP_ORDER.map((group) => {
+                  const items = groupedResults[group]
+                  if (items.length === 0) return null
+                  return (
+                    <Command.Group key={group} heading={getGroupLabel(group)}>
+                      <AnimatePresence mode="popLayout">
+                        {items.map((result, index) => (
+                          <motion.div
+                            key={`${group}-${result.id}`}
+                            layout
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.15, delay: index * 0.015 }}
+                          >
+                            <Command.Item
+                              value={`result:${result.id}`}
+                              onSelect={() => selectSearchResult(result)}
+                              className="flex cursor-pointer items-center gap-3 text-sm text-foreground"
+                            >
+                              <ResultIcon result={result} showAppIcons={showAppIcons} />
+                              <span className="min-w-0 flex-1 truncate">{result.title}</span>
+                              {result.subtitle && !(result.type === 'app' && result.subtitle.toLowerCase() === 'application') && (
+                                <span className="max-w-[220px] shrink-0 truncate text-xs text-muted-foreground">{result.subtitle}</span>
+                              )}
+                              <span className="shrink-0 rounded-md bg-muted/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                                {getCategoryLabel(result.type)}
+                              </span>
+                            </Command.Item>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </Command.Group>
+                  )
+                })
+              )}
+            </>
+          )}
+        </Command.List>
+
+        {isActionsView && activeActions.length > 0 && (
+          <div className="pointer-events-none absolute bottom-12 right-3 z-20 w-[280px]">
+            <div className="pointer-events-auto rounded-xl border border-border/70 bg-background/92 p-1.5 shadow-xl backdrop-blur-md">
+              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {STRINGS.palette.actionPanel}
+              </p>
+              <div className="mt-1 space-y-1">
+                {activeActions.map((action, index) => {
+                  const ActionIcon = action.icon
+                  const isSelected = index === selectedActionIndex
+                  return (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onMouseEnter={() => setSelectedActionIndex(index)}
+                      onClick={() => {
+                        action.onSelect()
+                        setPaletteView('results')
+                      }}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors',
+                        isSelected
+                          ? 'border-ring/45 bg-accent text-foreground shadow-sm'
+                          : 'border-transparent text-foreground/90 hover:border-ring/35 hover:bg-accent/70',
+                      )}
+                    >
+                      <ActionIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="truncate">{action.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex shrink-0 items-center justify-between border-t border-border/70 px-3 py-2 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (isClipboardMode && selectedClipboardEntry) {
+                  copyAndClose(selectedClipboardEntry)
+                  return
+                }
+                if (selectedSearchResult) {
+                  selectSearchResult(selectedSearchResult)
+                  return
+                }
+                if (selectedStartSuggestion) {
+                  selectedStartSuggestion.action()
+                  return
+                }
+                results[0]?.action()
+              }}
+              className="h-7 border border-transparent px-2 text-[11px] hover:border-ring/40 hover:bg-accent/90"
+            >
+              {isClipboardMode ? STRINGS.palette.actionPaste : STRINGS.palette.openCommand}
+            </Button>
+            {isClipboardMode && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void clearInBackend()}
+                className="h-7 border border-transparent px-2 text-[11px] hover:border-ring/40 hover:bg-accent/90"
+              >
+                {STRINGS.palette.clearAll}
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={isActionsView}
+              onClick={toggleActionsView}
+              className="h-7 border border-transparent px-2 text-[11px] hover:border-ring/40 hover:bg-accent/90"
+            >
+              {STRINGS.palette.actions}
+            </Button>
+            <Kbd>Ctrl K</Kbd>
+            {!isClipboardMode && commandExplainText && (
+              <span className="ml-1 max-w-[220px] truncate text-[10px] text-muted-foreground/95">{commandExplainText}</span>
+            )}
+          </div>
+        </div>
+      </Command>
+    </div>
+  )
+}
+
+function matchesQuick(queryLower: string, title: string, keywords: string[]): boolean {
+  const t = title.toLowerCase()
+  if (t.includes(queryLower) || queryLower.includes(t)) return true
+  return keywords.some((k) => k.includes(queryLower) || queryLower.includes(k))
+}
+
+function extractCommandEntityId(value: string, prefix: 'result' | 'suggestion'): string | null {
+  if (!value.startsWith(`${prefix}:`)) return null
+  return value.slice(prefix.length + 1) || null
+}
+
+const GROUP_ORDER: Array<keyof GroupedResults> = [
+  'command',
+  'application',
+  'preferences',
+  'file',
+  'plugin',
+  'clipboard',
+  'snippet',
+  'calculator',
+]
+
+function groupSearchResults(results: SearchResult[]): GroupedResults {
+  const grouped: GroupedResults = {
+    command: [],
+    application: [],
+    preferences: [],
+    file: [],
+    plugin: [],
+    clipboard: [],
+    snippet: [],
+    calculator: [],
+  }
+  for (const result of results) {
+    const group = normalizeGroup(result)
+    grouped[group].push(result)
+  }
+  return grouped
+}
+
+function normalizeGroup(result: SearchResult): keyof GroupedResults {
+  if (result.section === 'application') return 'application'
+  if (result.section === 'preferences') return 'preferences'
+  if (result.section === 'file') return 'file'
+  if (result.section === 'plugin') return 'plugin'
+  if (result.section === 'clipboard') return 'clipboard'
+  if (result.section === 'snippet') return 'snippet'
+  if (result.section === 'calculator') return 'calculator'
+  if (result.type === 'app') return 'application'
+  if (result.type === 'file') return 'file'
+  if (result.type === 'plugin') return 'plugin'
+  if (result.type === 'clipboard') return 'clipboard'
+  if (result.type === 'snippet') return 'snippet'
+  if (result.type === 'calculator') return 'calculator'
+  return 'command'
+}
+
+function getGroupLabel(group: keyof GroupedResults): string {
+  switch (group) {
+    case 'command':
+      return STRINGS.palette.commands
+    case 'application':
+      return STRINGS.palette.applications
+    case 'preferences':
+      return STRINGS.palette.preferences
+    case 'file':
+      return 'Files'
+    case 'plugin':
+      return 'Plugins'
+    case 'clipboard':
+      return STRINGS.palette.clipboardHistory
+    case 'snippet':
+      return STRINGS.palette.snippets
+    case 'calculator':
+      return STRINGS.palette.calculator
+    default:
+      return STRINGS.palette.results
+  }
+}
+
+function getCategoryLabel(type: string): string {
+  switch (type) {
+    case 'app': return STRINGS.palette.categoryApplication
+    case 'command': return STRINGS.palette.categorySystem
+    case 'file': return STRINGS.palette.categoryFile
+    case 'clipboard': return STRINGS.palette.categoryClipboard
+    case 'snippet': return STRINGS.palette.categorySnippet
+    case 'calculator': return STRINGS.palette.categoryCalculator
+    case 'plugin': return 'Plugin'
+    default: return STRINGS.palette.categoryApplication
+  }
+}
+
+function matchesClipboardType(entry: ClipboardEntry, filter: ClipboardTypeFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'link') {
+    if (entry.contentType !== 'text') return false
+    return isLikelyUrl(entry.content)
+  }
+  if (filter === 'text') return entry.contentType === 'text'
+  if (filter === 'image') return entry.contentType === 'image'
+  if (filter === 'file') return entry.contentType === 'file'
+  if (filter === 'code') return entry.contentType === 'code' || entry.contentType === 'html'
+  return true
+}
+
+function isLikelyUrl(value: string): boolean {
+  const trimmed = value.trim().toLowerCase()
+  return trimmed.startsWith('https://') || trimmed.startsWith('http://') || trimmed.startsWith('www.')
+}
+
+function isDangerousCommand(result: SearchResult): boolean {
+  if (result.type !== 'command') return false
+  return result.id === 'cmd-restart' || result.id === 'cmd-shutdown'
+}
+
+function composeSearchResultsBySection(results: SearchResult[], query: string, totalLimit: number): SearchResult[] {
+  if (results.length <= totalLimit) {
+    return results
+  }
+
+  const grouped = groupSearchResults(results)
+  const isEmptyQuery = query.trim() === ''
+  const sectionCaps = isEmptyQuery
+    ? ({
+      command: 8,
+      application: 10,
+      preferences: 6,
+      file: 2,
+      plugin: 2,
+      clipboard: 2,
+      snippet: 2,
+      calculator: 1,
+    } satisfies Record<keyof GroupedResults, number>)
+    : ({
+      command: 7,
+      application: 8,
+      preferences: 4,
+      file: 3,
+      plugin: 2,
+      clipboard: 3,
+      snippet: 3,
+      calculator: 2,
+    } satisfies Record<keyof GroupedResults, number>)
+
+  const merged: SearchResult[] = []
+  for (const group of GROUP_ORDER) {
+    const cap = sectionCaps[group]
+    const items = grouped[group]
+    if (items.length === 0) continue
+    merged.push(...items.slice(0, cap))
+  }
+
+  if (merged.length >= totalLimit) {
+    return merged.slice(0, totalLimit)
+  }
+
+  const selectedIds = new Set(merged.map((item) => item.id))
+  for (const group of GROUP_ORDER) {
+    for (const item of grouped[group]) {
+      if (selectedIds.has(item.id)) continue
+      merged.push(item)
+      selectedIds.add(item.id)
+      if (merged.length >= totalLimit) {
+        return merged
+      }
+    }
+  }
+
+  return merged
+}
+
+const appIconUrlCache = new Map<string, string>()
+const appIconPendingCache = new Set<string>()
+
+function ResultIcon({ result, showAppIcons }: { result: { type: string; icon?: string }; showAppIcons: boolean }) {
+  if (showAppIcons && (result.type === 'app' || result.type === 'file') && result.icon) {
+    return <AppNativeIcon appPath={result.icon} />
+  }
+  const type = result.type
+  const Icon =
+    type === 'app'
+      ? AppWindow
+      : type === 'file'
+        ? FileText
+        : type === 'clipboard'
+          ? ClipboardList
+          : type === 'snippet'
+            ? FileText
+            : type === 'calculator'
+              ? Calculator
+              : type === 'plugin'
+                ? Sparkles
+              : Zap
+  return <Icon className={cn('h-5 w-5 shrink-0', getResultIconTone(type))} />
+}
+
+function AppNativeIcon({ appPath }: { appPath: string }) {
+  const [source, setSource] = useState<string | null>(() => appIconUrlCache.get(appPath) ?? null)
+
+  useEffect(() => {
+    const cached = appIconUrlCache.get(appPath)
+    if (cached) {
+      setSource(cached)
+      return
+    }
+    if (appIconPendingCache.has(appPath)) return
+
+    appIconPendingCache.add(appPath)
+    void invoke<number[]>('get_path_icon_png', { path: appPath })
+      .then((bytes) => {
+        const objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' }))
+        appIconUrlCache.set(appPath, objectUrl)
+        setSource(objectUrl)
+      })
+      .catch(() => {
+        setSource(null)
+      })
+      .finally(() => {
+        appIconPendingCache.delete(appPath)
+      })
+  }, [appPath])
+
+  if (!source) {
+    return <AppWindow className="h-5 w-5 shrink-0 text-muted-foreground" />
+  }
+
+  return <img src={source} alt="" className="h-5 w-5 shrink-0 rounded-sm object-contain" loading="lazy" aria-hidden />
+}
+
+function getResultIconTone(type: string): string {
+  switch (type) {
+    case 'clipboard':
+      return 'text-sky-500 dark:text-sky-400'
+    case 'calculator':
+      return 'text-rose-500 dark:text-rose-400'
+    case 'snippet':
+      return 'text-emerald-500 dark:text-emerald-400'
+    case 'plugin':
+      return 'text-violet-500 dark:text-violet-400'
+    case 'command':
+      return 'text-amber-500 dark:text-amber-400'
+    default:
+      return 'text-muted-foreground'
+  }
+}

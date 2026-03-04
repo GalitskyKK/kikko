@@ -1,0 +1,29 @@
+# Разрешения для вызова команд приложения (clipboard, apps, files, system, snippets)
+[[permission]]
+identifier = "allow-app-invoke"
+description = "Allows invoking app commands: clipboard, apps, files, system, snippets"
+commands.allow = [
+  "get_clipboard_history",
+  "add_clipboard_entry",
+  "capture_clipboard_entry",
+  "toggle_favorite",
+  "toggle_pinned",
+  "delete_entry",
+  "clear_history",
+  "write_clipboard_entry",
+  "get_clipboard_asset_bytes",
+  "get_installed_apps",
+  "get_app_icon_png",
+  "get_path_icon_png",
+  "load_plugin_manifests",
+  "search_files",
+  "run_system_command",
+  "open_system_preferences",
+  "open_windows_settings",
+  "get_snippets",
+  "create_snippet",
+  "update_snippet",
+  "delete_snippet",
+  "mark_snippet_used",
+  "open_path"
+]

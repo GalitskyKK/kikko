@@ -1,0 +1,9 @@
+{
+  "id": "calculator-history",
+  "name": "Calculator History",
+  "version": "0.1.0",
+  "description": "Persistent calculator history for root search.",
+  "author": "Kikko",
+  "commandsCount": 2,
+  "widgetsCount": 1
+}

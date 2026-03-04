@@ -1,0 +1,9 @@
+{
+  "id": "emoji-picker",
+  "name": "Emoji Picker",
+  "version": "0.1.0",
+  "description": "Search emojis and copy to clipboard.",
+  "author": "Kikko",
+  "commandsCount": 1,
+  "widgetsCount": 0
+}

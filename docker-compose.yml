@@ -1,0 +1,7 @@
+services:
+  kikko-check:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    command: bash -lc "npm run lint && npm run build && cd src-tauri && cargo check"

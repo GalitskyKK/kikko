@@ -1,0 +1,9 @@
+{
+  "id": "uuid-generator",
+  "name": "UUID Generator",
+  "version": "0.1.0",
+  "description": "Generate UUID values from palette.",
+  "author": "Kikko",
+  "commandsCount": 1,
+  "widgetsCount": 0
+}
