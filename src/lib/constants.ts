@@ -15,7 +15,14 @@ export const SEARCH_RESULTS_LIMIT = 100
 
 /** Порядок групп в выдаче и лимит на группу (для настройки ранжирования и баланса). */
 export const SECTION_ORDER: Array<
-  'command' | 'application' | 'preferences' | 'file' | 'plugin' | 'clipboard' | 'snippet' | 'calculator'
+  | 'command'
+  | 'application'
+  | 'preferences'
+  | 'file'
+  | 'plugin'
+  | 'clipboard'
+  | 'snippet'
+  | 'calculator'
 > = [
   'command',
   'application',

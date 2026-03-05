@@ -276,10 +276,12 @@ export function SettingsPage() {
       setQuicklinkTags('')
       setQuicklinkError('')
       requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>('[data-settings-section="quicklinks"]')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
-        })
+        document
+          .querySelector<HTMLElement>('[data-settings-section="quicklinks"]')
+          ?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          })
         quicklinkNameInputRef.current?.focus()
       })
     }
@@ -481,7 +483,7 @@ export function SettingsPage() {
           <p className="text-muted-foreground text-[11px]">
             Bindings are saved; only the defaults above are active until runtime rebinding is wired.
           </p>
-          <div className="border-border/50 mt-3 rounded-lg border border-dashed bg-muted/20 px-3 py-2">
+          <div className="border-border/50 bg-muted/20 mt-3 rounded-lg border border-dashed px-3 py-2">
             <p className="text-muted-foreground text-xs">
               <strong className="text-foreground/90">Per-app shortcuts:</strong> assign a global
               hotkey to open a specific app or action (e.g. Super+1 for App) — planned; for now use
@@ -621,7 +623,8 @@ export function SettingsPage() {
               Quick Links
             </h2>
             <p className="text-muted-foreground text-xs">
-              Save links and open them from the palette. Use placeholders like {'{argument}'} in URL for future support.
+              Save links and open them from the palette. Use placeholders like {'{argument}'} in URL
+              for future support.
             </p>
           </div>
           <div className="grid gap-2 md:grid-cols-2">
@@ -667,7 +670,9 @@ export function SettingsPage() {
           </div>
           <div className="space-y-2">
             {quicklinks.length === 0 && (
-              <p className="text-muted-foreground text-xs">No quick links. Create one to open from the palette.</p>
+              <p className="text-muted-foreground text-xs">
+                No quick links. Create one to open from the palette.
+              </p>
             )}
             {quicklinks.map((q) => (
               <div
@@ -981,11 +986,7 @@ function formatShortcutFromEvent(event: KeyboardEvent): string {
   if (event.altKey) mods.push('Alt')
   if (event.shiftKey) mods.push('Shift')
   const key =
-    event.key === ' '
-      ? 'Space'
-      : event.key.length === 1
-        ? event.key.toUpperCase()
-        : event.key
+    event.key === ' ' ? 'Space' : event.key.length === 1 ? event.key.toUpperCase() : event.key
   if (!key || key === 'Unidentified') return mods.join('+') || ''
   return mods.length ? [...mods, key].join('+') : key
 }

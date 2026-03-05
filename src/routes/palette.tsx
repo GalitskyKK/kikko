@@ -30,6 +30,7 @@ import {
 } from '@tauri-apps/api/window'
 import { searchEngine } from '@/core/search/search-engine'
 import { getFileSearchables, getSearchables, looksLikeMath } from '@/core/search/search-sources'
+import type { SearchableWithAction } from '@/core/search/search-types'
 import { calculate } from '@/core/calculator/calculator-engine'
 import { ClipboardList as ClipboardEntriesList } from '@/components/clipboard/clipboard-list'
 import { ClipboardDetailPreview } from '@/components/clipboard/clipboard-preview'
@@ -104,6 +105,7 @@ export function PalettePage() {
   const [selectedActionIndex, setSelectedActionIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const searchRequestIdRef = useRef(0)
+  const searchablesCacheRef = useRef<SearchableWithAction[] | null>(null)
   const geometryRequestIdRef = useRef(0)
   const clipboardFilteredRef = useRef<ClipboardEntry[]>([])
   const selectedClipboardIdRef = useRef<string | null>(null)
@@ -248,18 +250,307 @@ export function PalettePage() {
     setSelectedActionIndex(0)
   }, [paletteView])
 
+  useEffect(() => {
+    if (mode !== 'search') return
+    if (searchablesCacheRef.current !== null) return
+    getSearchables('', {
+      navigate,
+      hideWindow,
+      openPaletteMode: (m) => setMode(m),
+    })
+      .then((searchables) => {
+        searchablesCacheRef.current = searchables
+        const initial = composeSearchResultsBySection(
+          searchEngine.search('', searchables, { cacheKey: 'initial' }),
+          '',
+          SEARCH_RESULTS_LIMIT,
+        )
+        setResults(initial)
+      })
+      .catch(() => {})
+  }, [mode, hideWindow, navigate, setMode, setResults])
+
   const runSearch = useCallback(
     (value: string) => {
       const requestId = ++searchRequestIdRef.current
-      setLoading(true)
       const queryLower = value.trim().toLowerCase()
-      getSearchables(value, {
+      const searchOptions = {
         navigate,
         hideWindow,
-        openPaletteMode: (mode) => setMode(mode),
-      })
+        openPaletteMode: (m: 'emoji' | 'quicklinks') => setMode(m),
+      }
+
+      const buildQuickActions = (): Array<{
+        id: string
+        type: 'clipboard' | 'calculator' | 'snippet' | 'command'
+        section: 'clipboard' | 'calculator' | 'snippet' | 'command' | 'preferences'
+        title: string
+        subtitle: string
+        score: number
+        action: () => void
+      }> => {
+        const quickActions: Array<{
+          id: string
+          type: 'clipboard' | 'calculator' | 'snippet' | 'command'
+          section: 'clipboard' | 'calculator' | 'snippet' | 'command' | 'preferences'
+          title: string
+          subtitle: string
+          score: number
+          action: () => void
+        }> = []
+        if (
+          enabledExtensions.clipboard &&
+          matchesQuick(queryLower, STRINGS.palette.clipboardHistory, [
+            'clipboard',
+            'clip',
+            'history',
+          ])
+        ) {
+          quickActions.push({
+            id: 'quick-clipboard',
+            type: 'clipboard',
+            section: 'clipboard',
+            title: STRINGS.palette.clipboardHistory,
+            subtitle: 'Kikkō',
+            score: 0.95,
+            action: () => {
+              setQuery('')
+              setMode('clipboard')
+            },
+          })
+        }
+        if (
+          enabledExtensions.calculator &&
+          matchesQuick(queryLower, STRINGS.palette.calculator, ['calc', 'calculator'])
+        ) {
+          quickActions.push({
+            id: 'quick-calc',
+            type: 'calculator',
+            section: 'calculator',
+            title: STRINGS.palette.calculator,
+            subtitle: 'Kikkō',
+            score: 0.95,
+            action: () => setMode('calculator'),
+          })
+        }
+        if (enabledExtensions.snippets) {
+          if (
+            matchesQuick(queryLower, 'Search Snippets', [
+              'snippets',
+              'snippet',
+              'search',
+            ])
+          ) {
+            quickActions.push({
+              id: 'quick-snippets-search',
+              type: 'snippet',
+              section: 'snippet',
+              title: 'Search Snippets',
+              subtitle: 'Open saved snippets',
+              score: 0.95,
+              action: () => setMode('snippets'),
+            })
+          }
+          if (
+            matchesQuick(queryLower, 'Create Snippet', [
+              'snippets',
+              'snippet',
+              'create',
+              'add',
+              'new',
+            ])
+          ) {
+            quickActions.push({
+              id: 'quick-snippets-create',
+              type: 'snippet',
+              section: 'snippet',
+              title: 'Create Snippet',
+              subtitle: 'Add new snippet in Settings',
+              score: 0.95,
+              action: () => {
+                if (typeof window !== 'undefined') {
+                  window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
+                }
+                void openSettingsWindow()
+                hideWindow()
+              },
+            })
+          }
+        }
+        if (
+          matchesQuick(queryLower, 'Quick Links', [
+            'quicklinks',
+            'quick links',
+            'links',
+            'search quicklinks',
+          ])
+        ) {
+          quickActions.push({
+            id: 'quick-quicklinks',
+            type: 'command',
+            section: 'command',
+            title: 'Quick Links',
+            subtitle: 'Open saved links',
+            score: 0.95,
+            action: () => setMode('quicklinks'),
+          })
+        }
+        if (
+          enabledExtensions.dashboard &&
+          matchesQuick(queryLower, STRINGS.palette.dashboard, ['dashboard', 'dash'])
+        ) {
+          quickActions.push({
+            id: 'quick-dashboard',
+            type: 'command',
+            section: 'command',
+            title: STRINGS.palette.dashboard,
+            subtitle: 'Kikkō',
+            score: 0.95,
+            action: () => {
+              void openDashboardWindow()
+              hideWindow()
+            },
+          })
+        }
+        if (matchesQuick(queryLower, STRINGS.palette.settings, ['settings', 'preferences'])) {
+          quickActions.push({
+            id: 'quick-settings',
+            type: 'command',
+            section: 'preferences',
+            title: STRINGS.palette.settings,
+            subtitle: 'Kikkō',
+            score: 0.95,
+            action: () => {
+              void openSettingsWindow()
+              hideWindow()
+            },
+          })
+        }
+        return quickActions
+      }
+
+      const cached = searchablesCacheRef.current
+      if (cached !== null && cached.length > 0) {
+        const quickActions = buildQuickActions()
+        let list = searchEngine.search(value, cached, { cacheKey: 'fast' })
+        if (looksLikeMath(value)) {
+          const calc = calculate(value)
+          if (calc.success) {
+            list = [
+              {
+                id: 'calc-result',
+                type: 'calculator' as const,
+                section: 'calculator' as const,
+                title: `= ${calc.value}`,
+                subtitle: calc.expression,
+                score: 1,
+                action: () => {
+                  if (!isTauriRuntime()) return
+                  setLastClipboardContent(calc.value)
+                  void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+                    writeText(calc.value),
+                  )
+                  hideWindow()
+                },
+              },
+              ...list,
+            ]
+          }
+        }
+        const fastResults = composeSearchResultsBySection(
+          [...quickActions, ...list],
+          value,
+          SEARCH_RESULTS_LIMIT,
+        )
+        setResults(fastResults)
+        setLoading(false)
+
+        void getSearchables(value, searchOptions).then((searchables) => {
+          if (requestId !== searchRequestIdRef.current) return
+          searchablesCacheRef.current = searchables
+          if (value.trim() === '') {
+            setResults(
+              composeSearchResultsBySection(
+                searchEngine.search('', searchables, { cacheKey: 'initial' }),
+                '',
+                SEARCH_RESULTS_LIMIT,
+              ),
+            )
+            setLoading(false)
+            return
+          }
+          let listBg = searchEngine.search(value, searchables, { cacheKey: 'full' })
+          const quickActionsBg = buildQuickActions()
+          if (looksLikeMath(value)) {
+            const calc = calculate(value)
+            if (calc.success) {
+              listBg = [
+                {
+                  id: 'calc-result',
+                  type: 'calculator' as const,
+                  section: 'calculator' as const,
+                  title: `= ${calc.value}`,
+                  subtitle: calc.expression,
+                  score: 1,
+                  action: () => {
+                    if (!isTauriRuntime()) return
+                    setLastClipboardContent(calc.value)
+                    void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+                      writeText(calc.value),
+                    )
+                    hideWindow()
+                  },
+                },
+                ...listBg,
+              ]
+            }
+          }
+          setResults(
+            composeSearchResultsBySection(
+              [...quickActionsBg, ...listBg],
+              value,
+              SEARCH_RESULTS_LIMIT,
+            ),
+          )
+          if (value.trim().length < 2) {
+            setLoading(false)
+            return
+          }
+          void getFileSearchables(value, { hideWindow })
+            .then((fileSearchables) => {
+              if (requestId !== searchRequestIdRef.current) return
+              if (fileSearchables.length === 0) {
+                setLoading(false)
+                return
+              }
+              const combined = [...searchables, ...fileSearchables]
+              listBg = searchEngine.search(value, combined, { cacheKey: 'full' })
+              setResults(
+                composeSearchResultsBySection(
+                  [...quickActionsBg, ...listBg],
+                  value,
+                  SEARCH_RESULTS_LIMIT,
+                ),
+              )
+              setLoading(false)
+            })
+            .catch(() => {
+              if (requestId !== searchRequestIdRef.current) return
+              setLoading(false)
+            })
+        }).catch(() => {
+          if (requestId !== searchRequestIdRef.current) return
+          setResults([])
+          setLoading(false)
+        })
+        return
+      }
+
+      setLoading(true)
+      getSearchables(value, searchOptions)
         .then((searchables) => {
           if (requestId !== searchRequestIdRef.current) return
+          searchablesCacheRef.current = searchables
           if (value.trim() === '') {
             const initialResults = composeSearchResultsBySection(
               searchEngine.search('', searchables, { cacheKey: 'initial' }),
@@ -271,145 +562,7 @@ export function PalettePage() {
             return
           }
           let list = searchEngine.search(value, searchables, { cacheKey: 'fast' })
-          const quickActions: Array<{
-            id: string
-            type: 'clipboard' | 'calculator' | 'snippet' | 'command'
-            section: 'clipboard' | 'calculator' | 'snippet' | 'command' | 'preferences'
-            title: string
-            subtitle: string
-            score: number
-            action: () => void
-          }> = []
-
-          if (
-            enabledExtensions.clipboard &&
-            matchesQuick(queryLower, STRINGS.palette.clipboardHistory, [
-              'clipboard',
-              'clip',
-              'history',
-            ])
-          ) {
-            quickActions.push({
-              id: 'quick-clipboard',
-              type: 'clipboard',
-              section: 'clipboard',
-              title: STRINGS.palette.clipboardHistory,
-              subtitle: 'Kikkō',
-              score: 0.95,
-              action: () => {
-                setQuery('')
-                setMode('clipboard')
-              },
-            })
-          }
-          if (
-            enabledExtensions.calculator &&
-            matchesQuick(queryLower, STRINGS.palette.calculator, ['calc', 'calculator'])
-          ) {
-            quickActions.push({
-              id: 'quick-calc',
-              type: 'calculator',
-              section: 'calculator',
-              title: STRINGS.palette.calculator,
-              subtitle: 'Kikkō',
-              score: 0.95,
-              action: () => setMode('calculator'),
-            })
-          }
-          if (enabledExtensions.snippets) {
-            if (
-              matchesQuick(queryLower, 'Search Snippets', [
-                'snippets',
-                'snippet',
-                'search',
-              ])
-            ) {
-              quickActions.push({
-                id: 'quick-snippets-search',
-                type: 'snippet',
-                section: 'snippet',
-                title: 'Search Snippets',
-                subtitle: 'Open saved snippets',
-                score: 0.95,
-                action: () => setMode('snippets'),
-              })
-            }
-            if (
-              matchesQuick(queryLower, 'Create Snippet', [
-                'snippets',
-                'snippet',
-                'create',
-                'add',
-                'new',
-              ])
-            ) {
-              quickActions.push({
-                id: 'quick-snippets-create',
-                type: 'snippet',
-                section: 'snippet',
-                title: 'Create Snippet',
-                subtitle: 'Add new snippet in Settings',
-                score: 0.95,
-                action: () => {
-                  if (typeof window !== 'undefined') {
-                    window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
-                  }
-                  void openSettingsWindow()
-                  hideWindow()
-                },
-              })
-            }
-          }
-          if (
-            matchesQuick(queryLower, 'Quick Links', [
-              'quicklinks',
-              'quick links',
-              'links',
-              'search quicklinks',
-            ])
-          ) {
-            quickActions.push({
-              id: 'quick-quicklinks',
-              type: 'command',
-              section: 'command',
-              title: 'Quick Links',
-              subtitle: 'Open saved links',
-              score: 0.95,
-              action: () => setMode('quicklinks'),
-            })
-          }
-          if (
-            enabledExtensions.dashboard &&
-            matchesQuick(queryLower, STRINGS.palette.dashboard, ['dashboard', 'dash'])
-          ) {
-            quickActions.push({
-              id: 'quick-dashboard',
-              type: 'command',
-              section: 'command',
-              title: STRINGS.palette.dashboard,
-              subtitle: 'Kikkō',
-              score: 0.95,
-              action: () => {
-                void openDashboardWindow()
-                hideWindow()
-              },
-            })
-          }
-          if (matchesQuick(queryLower, STRINGS.palette.settings, ['settings', 'preferences'])) {
-            quickActions.push({
-              id: 'quick-settings',
-              type: 'command',
-              section: 'preferences',
-              title: STRINGS.palette.settings,
-              subtitle: 'Kikkō',
-              score: 0.95,
-              action: () => {
-                void openSettingsWindow()
-                hideWindow()
-              },
-            })
-          }
-
+          const quickActions = buildQuickActions()
           if (looksLikeMath(value)) {
             const calc = calculate(value)
             if (calc.success) {
@@ -482,6 +635,8 @@ export function PalettePage() {
       enabledExtensions.snippets,
       hideWindow,
       navigate,
+      openDashboardWindow,
+      openSettingsWindow,
       setLoading,
       setResults,
     ],

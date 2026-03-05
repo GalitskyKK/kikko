@@ -19,17 +19,94 @@ const SYSTEM_COMMANDS: Array<{
   fallbackSettingsSectionId?: string
   dangerous?: boolean
 }> = [
-  { id: 'cmd-lock', title: 'Lock Screen', subtitle: 'System', keywords: ['lock', 'screen', 'block'], mode: 'system' },
-  { id: 'cmd-sleep', title: 'Sleep', subtitle: 'System', keywords: ['sleep', 'suspend'], mode: 'system' },
-  { id: 'cmd-trash', title: 'Empty Trash', subtitle: 'System', keywords: ['trash', 'empty', 'recycle'], mode: 'system' },
-  { id: 'cmd-volume-up', title: 'Volume Up', subtitle: 'System', keywords: ['volume', 'up', 'sound'], mode: 'system', fallbackSettingsSectionId: 'sound' },
-  { id: 'cmd-volume-down', title: 'Volume Down', subtitle: 'System', keywords: ['volume', 'down', 'sound'], mode: 'system', fallbackSettingsSectionId: 'sound' },
-  { id: 'cmd-volume-mute', title: 'Mute / Unmute Volume', subtitle: 'System', keywords: ['volume', 'mute', 'unmute', 'sound', 'toggle'], mode: 'system', fallbackSettingsSectionId: 'sound' },
-  { id: 'cmd-volume-set', title: 'Set Volume 50%', subtitle: 'System', keywords: ['volume', 'set', '50', 'sound', 'preset'], mode: 'system', args: ['50'], fallbackSettingsSectionId: 'sound' },
-  { id: 'cmd-volume-set', title: 'Set Volume 75%', subtitle: 'System', keywords: ['volume', 'set', '75', 'sound', 'preset'], mode: 'system', args: ['75'], fallbackSettingsSectionId: 'sound' },
-  { id: 'cmd-volume-set', title: 'Set Volume 100%', subtitle: 'System', keywords: ['volume', 'set', '100', 'max', 'sound', 'preset'], mode: 'system', args: ['100'], fallbackSettingsSectionId: 'sound' },
-  { id: 'cmd-restart', title: 'Restart Device', subtitle: 'Power', keywords: ['restart', 'reboot'], mode: 'system', dangerous: true },
-  { id: 'cmd-shutdown', title: 'Shutdown Device', subtitle: 'Power', keywords: ['shutdown', 'poweroff'], mode: 'system', dangerous: true },
+  {
+    id: 'cmd-lock',
+    title: 'Lock Screen',
+    subtitle: 'System',
+    keywords: ['lock', 'screen', 'block'],
+    mode: 'system',
+  },
+  {
+    id: 'cmd-sleep',
+    title: 'Sleep',
+    subtitle: 'System',
+    keywords: ['sleep', 'suspend'],
+    mode: 'system',
+  },
+  {
+    id: 'cmd-trash',
+    title: 'Empty Trash',
+    subtitle: 'System',
+    keywords: ['trash', 'empty', 'recycle'],
+    mode: 'system',
+  },
+  {
+    id: 'cmd-volume-up',
+    title: 'Volume Up',
+    subtitle: 'System',
+    keywords: ['volume', 'up', 'sound'],
+    mode: 'system',
+    fallbackSettingsSectionId: 'sound',
+  },
+  {
+    id: 'cmd-volume-down',
+    title: 'Volume Down',
+    subtitle: 'System',
+    keywords: ['volume', 'down', 'sound'],
+    mode: 'system',
+    fallbackSettingsSectionId: 'sound',
+  },
+  {
+    id: 'cmd-volume-mute',
+    title: 'Mute / Unmute Volume',
+    subtitle: 'System',
+    keywords: ['volume', 'mute', 'unmute', 'sound', 'toggle'],
+    mode: 'system',
+    fallbackSettingsSectionId: 'sound',
+  },
+  {
+    id: 'cmd-volume-set',
+    title: 'Set Volume 50%',
+    subtitle: 'System',
+    keywords: ['volume', 'set', '50', 'sound', 'preset'],
+    mode: 'system',
+    args: ['50'],
+    fallbackSettingsSectionId: 'sound',
+  },
+  {
+    id: 'cmd-volume-set',
+    title: 'Set Volume 75%',
+    subtitle: 'System',
+    keywords: ['volume', 'set', '75', 'sound', 'preset'],
+    mode: 'system',
+    args: ['75'],
+    fallbackSettingsSectionId: 'sound',
+  },
+  {
+    id: 'cmd-volume-set',
+    title: 'Set Volume 100%',
+    subtitle: 'System',
+    keywords: ['volume', 'set', '100', 'max', 'sound', 'preset'],
+    mode: 'system',
+    args: ['100'],
+    fallbackSettingsSectionId: 'sound',
+  },
+  {
+    id: 'cmd-restart',
+    title: 'Restart Device',
+    subtitle: 'Power',
+    keywords: ['restart', 'reboot'],
+    mode: 'system',
+    dangerous: true,
+  },
+  {
+    id: 'cmd-shutdown',
+    title: 'Shutdown Device',
+    subtitle: 'Power',
+    keywords: ['shutdown', 'poweroff'],
+    mode: 'system',
+    dangerous: true,
+  },
   {
     id: 'settings-display',
     title: 'Open Display Settings',
@@ -128,7 +205,9 @@ export async function getSearchables(
     calculator: true,
     dashboard: true,
   }
-  const aliasByTargetId = new Map(settings.aliases.map((rule) => [rule.targetId, rule.alias.trim().toLowerCase()]))
+  const aliasByTargetId = new Map(
+    settings.aliases.map((rule) => [rule.targetId, rule.alias.trim().toLowerCase()]),
+  )
   try {
     if (isTauriRuntime()) {
       const clipboardEntries = useClipboardStore.getState().entries
@@ -163,18 +242,33 @@ export async function getSearchables(
                   return
                 }
                 try {
-                  const output = await invoke<{ exit_code: number; supported: boolean; message?: string }>('run_system_command', {
+                  const output = await invoke<{
+                    exit_code: number
+                    supported: boolean
+                    message?: string
+                  }>('run_system_command', {
                     input: { command: cmd.id, args: cmd.args ?? [] },
                   })
                   if (output?.message) {
-                    logger.info('run_system_command result', { command: cmd.id, message: output.message })
+                    logger.info('run_system_command result', {
+                      command: cmd.id,
+                      message: output.message,
+                    })
                   }
-                  if ((output && (!output.supported || output.exit_code !== 0)) && cmd.fallbackSettingsSectionId) {
-                    await invoke('open_system_preferences', { sectionId: cmd.fallbackSettingsSectionId })
+                  if (
+                    output &&
+                    (!output.supported || output.exit_code !== 0) &&
+                    cmd.fallbackSettingsSectionId
+                  ) {
+                    await invoke('open_system_preferences', {
+                      sectionId: cmd.fallbackSettingsSectionId,
+                    })
                   }
                 } catch {
                   if (cmd.fallbackSettingsSectionId) {
-                    await invoke('open_system_preferences', { sectionId: cmd.fallbackSettingsSectionId })
+                    await invoke('open_system_preferences', {
+                      sectionId: cmd.fallbackSettingsSectionId,
+                    })
                   }
                 }
               })
@@ -202,7 +296,9 @@ export async function getSearchables(
             score: e.isFavorite || e.isPinned ? 1 : 0.5,
             action: () => {
               if (isTauriRuntime()) {
-                void import('@tauri-apps/api/core').then(({ invoke }) => invoke('write_clipboard_entry', { id: e.id }))
+                void import('@tauri-apps/api/core').then(({ invoke }) =>
+                  invoke('write_clipboard_entry', { id: e.id }),
+                )
                 hideWindow()
               }
             },
@@ -225,13 +321,21 @@ export async function getSearchables(
               title: s.name,
               subtitle: s.keyword,
               alias: aliasByTargetId.get(s.id),
-              keywords: [s.keyword, s.content.slice(0, 100), aliasByTargetId.get(s.id) ?? ''].filter(Boolean),
+              keywords: [
+                s.keyword,
+                s.content.slice(0, 100),
+                aliasByTargetId.get(s.id) ?? '',
+              ].filter(Boolean),
             },
             score: 0.8,
             action: () => {
               if (isTauriRuntime()) {
-                void import('@tauri-apps/api/core').then(({ invoke }) => invoke('mark_snippet_used', { id: s.id }))
-                void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(s.content))
+                void import('@tauri-apps/api/core').then(({ invoke }) =>
+                  invoke('mark_snippet_used', { id: s.id }),
+                )
+                void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+                  writeText(s.content),
+                )
                 hideWindow()
               }
             },
@@ -273,7 +377,10 @@ export async function getSearchables(
       if (apps.length === 0) {
         try {
           const { invoke } = await import('@tauri-apps/api/core')
-          const fetched = (await invoke<Array<{ id: string; name: string; path?: string }>>('get_installed_apps')) ?? []
+          const fetched =
+            (await invoke<Array<{ id: string; name: string; path?: string }>>(
+              'get_installed_apps',
+            )) ?? []
           useInstalledAppsStore.setState({ apps: fetched, loaded: true })
           apps = fetched
         } catch (err) {
@@ -291,18 +398,24 @@ export async function getSearchables(
             subtitle: 'Application',
             icon: showAppIcons ? app.path : undefined,
             alias: aliasByTargetId.get(app.id),
-            keywords: [app.name, nameLower, nameLower.replace(/\s+/g, ''), aliasByTargetId.get(app.id) ?? ''].filter(Boolean),
+            keywords: [
+              app.name,
+              nameLower,
+              nameLower.replace(/\s+/g, ''),
+              aliasByTargetId.get(app.id) ?? '',
+            ].filter(Boolean),
           },
           score: 0.9,
           action: () => {
             if (app.path) {
-              void import('@tauri-apps/api/core').then(({ invoke }) => invoke('open_path', { path: app.path }))
+              void import('@tauri-apps/api/core').then(({ invoke }) =>
+                invoke('open_path', { path: app.path }),
+              )
             }
             hideWindow()
           },
         })
       }
-
     }
   } catch (err) {
     logger.warn('getSearchables error', { error: err })
@@ -338,7 +451,9 @@ export async function getFileSearchables(
       },
       score: 0.85,
       action: () => {
-        void import('@tauri-apps/api/core').then(({ invoke }) => invoke('open_path', { path: f.path }))
+        void import('@tauri-apps/api/core').then(({ invoke }) =>
+          invoke('open_path', { path: f.path }),
+        )
         hideWindow()
       },
     }))

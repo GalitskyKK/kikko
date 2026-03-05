@@ -112,7 +112,11 @@ export function createSearchEngine() {
       .sort((a, b) => b.score - a.score)
 
     if (results.length > 0 && useCache) setCached(trimmed, results, cacheKey)
-    logger.debug('search', { query: trimmed, resultsCount: results.length, searchablesCount: searchables.length })
+    logger.debug('search', {
+      query: trimmed,
+      resultsCount: results.length,
+      searchablesCount: searchables.length,
+    })
     return results
   }
 
