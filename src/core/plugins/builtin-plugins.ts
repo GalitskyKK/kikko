@@ -32,9 +32,9 @@ export const builtInPluginManifests: PluginManifest[] = [
     id: 'quick-links',
     name: 'Quick Links',
     version: '0.1.0',
-    description: 'Open favorite links and folders.',
+    description: 'Search saved links or create new ones.',
     author: 'Kikko',
-    commandsCount: 3,
+    commandsCount: 2,
     widgetsCount: 1,
   },
   {

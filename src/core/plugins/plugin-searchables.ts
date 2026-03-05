@@ -6,6 +6,8 @@ import { usePluginStore } from '@/stores/plugin-store'
 
 interface PluginSearchableOptions {
   hideWindow: () => void
+  /** Switch palette to a dedicated mode (emoji, quicklinks). When set, action does not hide window. */
+  openPaletteMode?: (mode: 'emoji' | 'quicklinks') => void
 }
 
 export function getPluginSearchables(options: PluginSearchableOptions): SearchableWithAction[] {
@@ -40,20 +42,22 @@ export function getPluginSearchables(options: PluginSearchableOptions): Searchab
     'emoji-picker': () => [
       {
         item: {
-          id: 'plugin-emoji-fire',
+          id: 'plugin-emoji-picker',
           type: 'plugin',
           section: 'plugin',
-          title: 'Copy emoji: Fire',
-          subtitle: 'Plugin: Emoji Picker',
-          keywords: ['emoji', 'fire', 'plugin'],
+          title: 'Emoji Picker',
+          subtitle: 'Search and copy emojis',
+          keywords: ['emoji', 'emoji picker', 'symbols', 'smiley', 'copy emoji'],
         },
-        score: 0.72,
+        score: 0.9,
         action: () => {
-          if (isTauriRuntime()) {
-            void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText('🔥'))
+          if (options.openPaletteMode) {
+            options.openPaletteMode('emoji')
+            return
           }
-          toast.success('Emoji copied to clipboard')
-          hideWindow()
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('kikko:palette-mode', { detail: 'emoji' }))
+          }
         },
       },
     ],
@@ -122,19 +126,44 @@ export function getPluginSearchables(options: PluginSearchableOptions): Searchab
     'quick-links': () => [
       {
         item: {
-          id: 'plugin-quick-link-github',
+          id: 'plugin-quicklinks-search',
           type: 'plugin',
           section: 'plugin',
-          title: 'Open GitHub',
-          subtitle: 'Plugin: Quick Links',
-          keywords: ['github', 'quick links', 'plugin', 'open'],
+          title: 'Search Quicklinks',
+          subtitle: 'Open saved links',
+          keywords: ['quick links', 'quicklinks', 'search', 'links', 'open'],
         },
-        score: 0.7,
+        score: 0.92,
         action: () => {
-          if (!isTauriRuntime()) return
-          void import('@tauri-apps/plugin-shell').then(({ open }) => open('https://github.com'))
-          toast.success('Opening GitHub')
-          hideWindow()
+          if (options.openPaletteMode) {
+            options.openPaletteMode('quicklinks')
+            return
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('kikko:palette-mode', { detail: 'quicklinks' }))
+          }
+        },
+      },
+      {
+        item: {
+          id: 'plugin-quicklinks-create',
+          type: 'plugin',
+          section: 'plugin',
+          title: 'Create Quicklink',
+          subtitle: 'Add new link in Settings',
+          keywords: ['quick links', 'quicklinks', 'create', 'add', 'new link'],
+        },
+        score: 0.88,
+        action: () => {
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem('kikko:settings:focus-section', 'quicklinks')
+          }
+          if (isTauriRuntime()) {
+            void import('@/lib/window-navigation').then(({ openSettingsWindow }) =>
+              openSettingsWindow(),
+            )
+          }
+          options.hideWindow()
         },
       },
     ],

@@ -25,6 +25,10 @@ commands.allow = [
   "update_snippet",
   "delete_snippet",
   "mark_snippet_used",
+  "get_quicklinks",
+  "create_quicklink",
+  "update_quicklink",
+  "delete_quicklink",
   "open_path",
   "exit_app",
   "show_palette_or_toggle"

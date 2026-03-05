@@ -19,6 +19,7 @@ import {
   Trash2,
   Zap,
   Sparkles,
+  Link,
 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import {
@@ -33,6 +34,7 @@ import { calculate } from '@/core/calculator/calculator-engine'
 import { ClipboardList as ClipboardEntriesList } from '@/components/clipboard/clipboard-list'
 import { ClipboardDetailPreview } from '@/components/clipboard/clipboard-preview'
 import { Button } from '@/components/ui/button'
+import { toast } from '@/components/ui/sonner'
 import { IconButton } from '@/components/ui/icon-button'
 import { Kbd } from '@/components/ui/kbd'
 import {
@@ -46,6 +48,13 @@ import {
   SEARCH_ENGINES,
   SEARCH_RESULTS_LIMIT,
 } from '@/lib/constants'
+import {
+  EMOJI_LIST,
+  filterEmojiList,
+  getEmojiGridSections,
+  getEmojiWithFrequentFirst,
+  markEmojiUsed,
+} from '@/data/emoji-data'
 import { STRINGS } from '@/lib/strings'
 import { setLastClipboardContent } from '@/lib/clipboard-polling'
 import { isTauriRuntime } from '@/lib/tauri'
@@ -54,10 +63,11 @@ import { useClipboardStore, type ClipboardEntry } from '@/stores/clipboard-store
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { useSearchStore, type SearchResult } from '@/stores/search-store'
 import { useSettingsStore } from '@/stores/settings-store'
+import { useQuicklinkStore } from '@/stores/quicklink-store'
 import { useSnippetStore } from '@/stores/snippet-store'
 import { cn } from '@/utils/cn'
 
-type PaletteMode = 'search' | 'clipboard' | 'snippets' | 'calculator'
+type PaletteMode = 'search' | 'clipboard' | 'snippets' | 'calculator' | 'emoji' | 'quicklinks'
 type PaletteView = 'results' | 'actions'
 type ClipboardTypeFilter = 'all' | 'text' | 'link' | 'image' | 'file' | 'code'
 type GroupedResults = Record<
@@ -85,6 +95,8 @@ export function PalettePage() {
   const [query, setQuery] = useState('')
   const [selectedClipboardId, setSelectedClipboardId] = useState<string | null>(null)
   const [selectedSnippetId, setSelectedSnippetId] = useState<string | null>(null)
+  const [selectedEmojiIndex, setSelectedEmojiIndex] = useState(0)
+  const [selectedQuicklinkId, setSelectedQuicklinkId] = useState<string | null>(null)
   const [paletteView, setPaletteView] = useState<PaletteView>('results')
   const [clipboardTypeFilter, setClipboardTypeFilter] = useState<ClipboardTypeFilter>('all')
   const [pendingDangerousResult, setPendingDangerousResult] = useState<SearchResult | null>(null)
@@ -95,6 +107,10 @@ export function PalettePage() {
   const geometryRequestIdRef = useRef(0)
   const clipboardFilteredRef = useRef<ClipboardEntry[]>([])
   const selectedClipboardIdRef = useRef<string | null>(null)
+  const quicklinksFilteredRef = useRef<Array<{ id: string }>>([])
+  const selectedQuicklinkIdRef = useRef<string | null>(null)
+  const snippetsFilteredRef = useRef<Array<{ id: string }>>([])
+  const selectedSnippetIdRef = useRef<string | null>(null)
 
   const { results, setResults, setLoading, isLoading } = useSearchStore()
   const showStartSuggestions = useSettingsStore((state) => state.general.showStartSuggestions)
@@ -121,6 +137,7 @@ export function PalettePage() {
   } = useClipboardStore()
   const snippets = useSnippetStore((state) => state.snippets)
   const markSnippetUsed = useSnippetStore((state) => state.markSnippetUsed)
+  const quicklinks = useQuicklinkStore((state) => state.quicklinks)
 
   const hideWindow = useCallback(() => {
     if (!isTauriRuntime()) return
@@ -140,6 +157,7 @@ export function PalettePage() {
     void useInstalledAppsStore.getState().loadApps()
     void loadClipboard()
     void useSnippetStore.getState().loadFromBackend()
+    void useQuicklinkStore.getState().loadFromBackend()
   }, [loadClipboard])
 
   useEffect(() => {
@@ -148,8 +166,16 @@ export function PalettePage() {
     let unlisten: (() => void) | null = null
     void import('@tauri-apps/api/event')
       .then(({ listen }) => {
-        return listen('kikko:snippets-updated', () => {
-          void useSnippetStore.getState().loadFromBackend()
+        return Promise.all([
+          listen('kikko:snippets-updated', () => {
+            void useSnippetStore.getState().loadFromBackend()
+          }),
+          listen('kikko:quicklinks-updated', () => {
+            void useQuicklinkStore.getState().loadFromBackend()
+          }),
+        ]).then(([unlistenSnippets, unlistenQuicklinks]) => () => {
+          unlistenSnippets()
+          unlistenQuicklinks()
         })
       })
       .then((cleanup) => {
@@ -167,10 +193,34 @@ export function PalettePage() {
   }, [])
 
   useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<'emoji' | 'quicklinks'>).detail
+      if (detail === 'emoji' || detail === 'quicklinks') {
+        setQuery('')
+        setMode(detail)
+      }
+    }
+    window.addEventListener('kikko:palette-mode', handler)
+    return () => window.removeEventListener('kikko:palette-mode', handler)
+  }, [])
+
+  useEffect(() => {
+    if (mode === 'emoji' || mode === 'quicklinks' || mode === 'snippets') {
+      setQuery('')
+    }
+  }, [mode])
+
+  useEffect(() => {
     if (mode === 'clipboard' && isTauriRuntime()) {
       void loadClipboard()
     }
   }, [mode, loadClipboard])
+
+  useEffect(() => {
+    if (mode === 'quicklinks' && isTauriRuntime()) {
+      void useQuicklinkStore.getState().loadFromBackend()
+    }
+  }, [mode])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -203,7 +253,11 @@ export function PalettePage() {
       const requestId = ++searchRequestIdRef.current
       setLoading(true)
       const queryLower = value.trim().toLowerCase()
-      getSearchables(value, { navigate, hideWindow })
+      getSearchables(value, {
+        navigate,
+        hideWindow,
+        openPaletteMode: (mode) => setMode(mode),
+      })
         .then((searchables) => {
           if (requestId !== searchRequestIdRef.current) return
           if (value.trim() === '') {
@@ -262,18 +316,66 @@ export function PalettePage() {
               action: () => setMode('calculator'),
             })
           }
+          if (enabledExtensions.snippets) {
+            if (
+              matchesQuick(queryLower, 'Search Snippets', [
+                'snippets',
+                'snippet',
+                'search',
+              ])
+            ) {
+              quickActions.push({
+                id: 'quick-snippets-search',
+                type: 'snippet',
+                section: 'snippet',
+                title: 'Search Snippets',
+                subtitle: 'Open saved snippets',
+                score: 0.95,
+                action: () => setMode('snippets'),
+              })
+            }
+            if (
+              matchesQuick(queryLower, 'Create Snippet', [
+                'snippets',
+                'snippet',
+                'create',
+                'add',
+                'new',
+              ])
+            ) {
+              quickActions.push({
+                id: 'quick-snippets-create',
+                type: 'snippet',
+                section: 'snippet',
+                title: 'Create Snippet',
+                subtitle: 'Add new snippet in Settings',
+                score: 0.95,
+                action: () => {
+                  if (typeof window !== 'undefined') {
+                    window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
+                  }
+                  void openSettingsWindow()
+                  hideWindow()
+                },
+              })
+            }
+          }
           if (
-            enabledExtensions.snippets &&
-            matchesQuick(queryLower, STRINGS.palette.snippets, ['snippet', 'snippets'])
+            matchesQuick(queryLower, 'Quick Links', [
+              'quicklinks',
+              'quick links',
+              'links',
+              'search quicklinks',
+            ])
           ) {
             quickActions.push({
-              id: 'quick-snippets',
-              type: 'snippet',
-              section: 'snippet',
-              title: STRINGS.palette.snippets,
-              subtitle: 'Kikkō',
+              id: 'quick-quicklinks',
+              type: 'command',
+              section: 'command',
+              title: 'Quick Links',
+              subtitle: 'Open saved links',
               score: 0.95,
-              action: () => setMode('snippets'),
+              action: () => setMode('quicklinks'),
             })
           }
           if (
@@ -410,6 +512,8 @@ export function PalettePage() {
 
   const isClipboardMode = mode === 'clipboard'
   const isSnippetsMode = mode === 'snippets'
+  const isEmojiMode = mode === 'emoji'
+  const isQuicklinksMode = mode === 'quicklinks'
   const isRootMode = mode === 'search'
   const isEmptyQuery = query.trim() === ''
   const shouldShowStartSuggestions =
@@ -450,7 +554,8 @@ export function PalettePage() {
       if (!payload) return
       applyPaletteGeometry()
       void useSnippetStore.getState().loadFromBackend()
-      if (mode === 'search') {
+      void useQuicklinkStore.getState().loadFromBackend()
+    if (mode === 'search') {
         runSearch(query)
       }
     })
@@ -495,6 +600,36 @@ export function PalettePage() {
     )
   }, [isSnippetsMode, query, snippets])
 
+  const emojiListWithFrequent = useMemo(
+    () => getEmojiWithFrequentFirst(EMOJI_LIST),
+    [],
+  )
+  const emojiFiltered = useMemo(() => {
+    if (!isEmojiMode) return []
+    return filterEmojiList(emojiListWithFrequent, query)
+  }, [isEmojiMode, query, emojiListWithFrequent])
+
+  const emojiGridSections = useMemo(
+    () => getEmojiGridSections(emojiFiltered),
+    [emojiFiltered],
+  )
+  const emojiFlatList = useMemo(
+    () => emojiGridSections.flatMap((s) => s.entries),
+    [emojiGridSections],
+  )
+
+  const quicklinksFiltered = useMemo(() => {
+    if (!isQuicklinksMode) return []
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return quicklinks.slice(0, 100)
+    return quicklinks.filter(
+      (q) =>
+        q.name.toLowerCase().includes(normalized) ||
+        q.url.toLowerCase().includes(normalized) ||
+        q.tags.some((t) => t.toLowerCase().includes(normalized)),
+    )
+  }, [isQuicklinksMode, query, quicklinks])
+
   useEffect(() => {
     if (!isClipboardMode || clipboardFiltered.length === 0) {
       setSelectedClipboardId(null)
@@ -528,6 +663,135 @@ export function PalettePage() {
     setSelectedSnippetId((current) => current ?? snippetsFiltered[0]?.id ?? null)
   }, [isSnippetsMode, snippetsFiltered])
 
+  useEffect(() => {
+    if (!isEmojiMode || emojiFlatList.length === 0) {
+      setSelectedEmojiIndex(0)
+      return
+    }
+    setSelectedEmojiIndex((current) =>
+      current >= emojiFlatList.length ? 0 : current,
+    )
+  }, [isEmojiMode, emojiFlatList.length])
+
+  useEffect(() => {
+    if (!isEmojiMode || emojiFlatList.length === 0) return
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('[data-emoji-selected="true"]')
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+  }, [isEmojiMode, selectedEmojiIndex, emojiFlatList.length])
+
+  useEffect(() => {
+    if (!isQuicklinksMode || quicklinksFiltered.length === 0) {
+      setSelectedQuicklinkId(null)
+      return
+    }
+    setSelectedQuicklinkId((current) => {
+      const firstId = quicklinksFiltered[0]?.id ?? null
+      const stillValid = current && quicklinksFiltered.some((q) => q.id === current)
+      return stillValid ? current : firstId
+    })
+  }, [isQuicklinksMode, quicklinksFiltered])
+
+  useEffect(() => {
+    if (isQuicklinksMode && selectedQuicklinkId) {
+      setSelectedCommandValue(`quicklink:${selectedQuicklinkId}`)
+    }
+  }, [isQuicklinksMode, selectedQuicklinkId])
+
+  useEffect(() => {
+    if (isSnippetsMode && selectedSnippetId) {
+      setSelectedCommandValue(`snippet-entry:${selectedSnippetId}`)
+    }
+  }, [isSnippetsMode, selectedSnippetId])
+
+  useEffect(() => {
+    if (!isQuicklinksMode || !selectedQuicklinkId || quicklinksFiltered.length === 0) return
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('[data-quicklink-selected="true"]')
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+  }, [isQuicklinksMode, selectedQuicklinkId, quicklinksFiltered.length])
+
+  useEffect(() => {
+    quicklinksFilteredRef.current = quicklinksFiltered
+    selectedQuicklinkIdRef.current = selectedQuicklinkId
+    snippetsFilteredRef.current = snippetsFiltered
+    selectedSnippetIdRef.current = selectedSnippetId
+  })
+
+  useEffect(() => {
+    const handleDocKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return
+
+      const qList = quicklinksFilteredRef.current
+      const qId = selectedQuicklinkIdRef.current
+      if (isQuicklinksMode && qList.length > 0) {
+        event.preventDefault()
+        event.stopPropagation()
+        const currentIndex = qList.findIndex((q) => q.id === qId)
+        if (event.key === 'ArrowDown') {
+          const nextIndex = currentIndex >= qList.length - 1 ? 0 : currentIndex + 1
+          const nextId = qList[nextIndex]?.id
+          if (nextId) setSelectedQuicklinkId(nextId)
+          return
+        }
+        if (event.key === 'ArrowUp') {
+          const nextIndex = currentIndex <= 0 ? qList.length - 1 : currentIndex - 1
+          const nextId = qList[nextIndex]?.id
+          if (nextId) setSelectedQuicklinkId(nextId)
+          return
+        }
+        if (event.key === 'Enter' && qId) {
+          const link = qList.find((q) => q.id === qId) as { id: string; url: string } | undefined
+          if (link && isTauriRuntime()) {
+            void import('@tauri-apps/plugin-shell').then(({ open }) => open(link.url))
+            hideWindow()
+          }
+        }
+        return
+      }
+
+      const sList = snippetsFilteredRef.current
+      const sId = selectedSnippetIdRef.current
+      if (isSnippetsMode && sList.length > 0) {
+        event.preventDefault()
+        event.stopPropagation()
+        const currentIndex = sList.findIndex((s) => s.id === sId)
+        if (event.key === 'ArrowDown') {
+          const nextIndex = currentIndex >= sList.length - 1 ? 0 : currentIndex + 1
+          const nextId = sList[nextIndex]?.id
+          if (nextId) setSelectedSnippetId(nextId)
+          return
+        }
+        if (event.key === 'ArrowUp') {
+          const nextIndex = currentIndex <= 0 ? sList.length - 1 : currentIndex - 1
+          const nextId = sList[nextIndex]?.id
+          if (nextId) setSelectedSnippetId(nextId)
+          return
+        }
+        if (event.key === 'Enter' && sId) {
+          const snippet = sList.find((s) => s.id === sId) as
+            | { id: string; content: string }
+            | undefined
+          if (snippet && isTauriRuntime()) {
+            void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+              writeText(snippet.content),
+            )
+            void markSnippetUsed(snippet.id)
+            hideWindow()
+          }
+        }
+      }
+    }
+
+    if (!isQuicklinksMode && !isSnippetsMode) return
+    document.addEventListener('keydown', handleDocKeyDown, true)
+    return () => document.removeEventListener('keydown', handleDocKeyDown, true)
+  }, [isQuicklinksMode, isSnippetsMode, hideWindow, markSnippetUsed])
+
   const copyAndClose = useCallback(
     (entry: ClipboardEntry) => {
       if (!isTauriRuntime()) return
@@ -547,6 +811,10 @@ export function PalettePage() {
   const selectedSnippetEntry = useMemo(
     () => snippetsFiltered.find((snippet) => snippet.id === selectedSnippetId) ?? null,
     [selectedSnippetId, snippetsFiltered],
+  )
+  const selectedQuicklinkEntry = useMemo(
+    () => quicklinksFiltered.find((q) => q.id === selectedQuicklinkId) ?? null,
+    [quicklinksFiltered, selectedQuicklinkId],
   )
 
   const clipboardActions = useMemo<PaletteAction[]>(() => {
@@ -661,15 +929,37 @@ export function PalettePage() {
       ...(enabledExtensions.snippets
         ? [
             {
-              id: 'start-snippets',
-              title: STRINGS.palette.snippets,
+              id: 'start-snippets-search',
+              title: 'Search Snippets',
               subtitle: 'Kikkō',
               icon: FileText,
               iconClassName: 'text-emerald-500 dark:text-emerald-400',
               action: () => setMode('snippets'),
             },
+            {
+              id: 'start-snippets-create',
+              title: 'Create Snippet',
+              subtitle: 'Kikkō',
+              icon: FileText,
+              iconClassName: 'text-emerald-500 dark:text-emerald-400',
+              action: () => {
+                if (typeof window !== 'undefined') {
+                  window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
+                }
+                void openSettingsWindow()
+                hideWindow()
+              },
+            },
           ]
         : []),
+      {
+        id: 'start-quicklinks',
+        title: 'Quick Links',
+        subtitle: 'Kikkō',
+        icon: Link,
+        iconClassName: 'text-blue-500 dark:text-blue-400',
+        action: () => setMode('quicklinks'),
+      },
       // Калькулятор не в саджестах — встроен в поиск (достаточно ввести выражение)
     ],
     [
@@ -799,11 +1089,43 @@ export function PalettePage() {
     ]
   }, [copyTextToClipboard, hideWindow, markSnippetUsed, selectedSnippetEntry])
 
+  const quicklinkActions = useMemo<PaletteAction[]>(() => {
+    if (!selectedQuicklinkEntry) return []
+    return [
+      {
+        id: 'quicklink-open',
+        label: STRINGS.palette.openCommand,
+        icon: Link,
+        onSelect: () => {
+          if (!isTauriRuntime()) return
+          void import('@tauri-apps/plugin-shell').then(({ open }) =>
+            open(selectedQuicklinkEntry.url),
+          )
+          hideWindow()
+        },
+      },
+      {
+        id: 'quicklink-copy-url',
+        label: 'Copy URL',
+        icon: ClipboardList,
+        onSelect: () => copyTextToClipboard(selectedQuicklinkEntry.url),
+      },
+      {
+        id: 'quicklink-copy-name',
+        label: 'Copy name',
+        icon: FileText,
+        onSelect: () => copyTextToClipboard(selectedQuicklinkEntry.name),
+      },
+    ]
+  }, [copyTextToClipboard, hideWindow, selectedQuicklinkEntry])
+
   const activeActions = isClipboardMode
     ? clipboardActions
     : isSnippetsMode
       ? snippetActions
-      : searchActions
+      : isQuicklinksMode
+        ? quicklinkActions
+        : searchActions
 
   const toggleActionsView = useCallback(() => {
     if (activeActions.length === 0) return
@@ -914,6 +1236,44 @@ export function PalettePage() {
         }
         return
       }
+      if (isEmojiMode && emojiFlatList.length > 0) {
+        const cols = 8
+        const total = emojiFlatList.length
+        if (event.key === 'ArrowRight') {
+          event.preventDefault()
+          setSelectedEmojiIndex((i) => (i >= total - 1 ? 0 : i + 1))
+          return
+        }
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault()
+          setSelectedEmojiIndex((i) => (i <= 0 ? total - 1 : i - 1))
+          return
+        }
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          setSelectedEmojiIndex((i) => (i + cols >= total ? i : i + cols))
+          return
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault()
+          setSelectedEmojiIndex((i) => (i - cols < 0 ? i : i - cols))
+          return
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          const entry = emojiFlatList[selectedEmojiIndex]
+          if (entry && isTauriRuntime()) {
+            void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+              writeText(entry.emoji),
+            )
+            markEmojiUsed(entry.emoji)
+            toast.success('Emoji copied to clipboard')
+            hideWindow()
+          }
+          return
+        }
+        return
+      }
       if (isSnippetsMode && snippetsFiltered.length > 0) {
         const currentIndex = snippetsFiltered.findIndex(
           (snippet) => snippet.id === selectedSnippetId,
@@ -945,6 +1305,35 @@ export function PalettePage() {
         }
         return
       }
+      if (isQuicklinksMode && quicklinksFiltered.length > 0) {
+        const currentIndex = quicklinksFiltered.findIndex(
+          (q) => q.id === selectedQuicklinkId,
+        )
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          const nextIndex = currentIndex >= quicklinksFiltered.length - 1 ? 0 : currentIndex + 1
+          const nextId = quicklinksFiltered[nextIndex]?.id
+          if (nextId) setSelectedQuicklinkId(nextId)
+          return
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault()
+          const nextIndex = currentIndex <= 0 ? quicklinksFiltered.length - 1 : currentIndex - 1
+          const nextId = quicklinksFiltered[nextIndex]?.id
+          if (nextId) setSelectedQuicklinkId(nextId)
+          return
+        }
+        if (event.key === 'Enter' && selectedQuicklinkId) {
+          event.preventDefault()
+          const link = quicklinksFiltered.find((q) => q.id === selectedQuicklinkId)
+          if (link && isTauriRuntime()) {
+            void import('@tauri-apps/plugin-shell').then(({ open }) => open(link.url))
+            hideWindow()
+          }
+          return
+        }
+        return
+      }
       if (isClipboardMode) return
     },
     [
@@ -952,17 +1341,22 @@ export function PalettePage() {
       clipboardFiltered,
       closeOnEscape,
       copyAndClose,
+      emojiFlatList,
       hideWindow,
       isActionsView,
       isClipboardMode,
+      isEmojiMode,
       isSnippetsMode,
       markSnippetUsed,
       mode,
       pendingDangerousResult,
       query,
+      quicklinksFiltered,
       runSearch,
       selectedActionIndex,
       selectedClipboardId,
+      selectedEmojiIndex,
+      selectedQuicklinkId,
       selectedSnippetId,
       snippetsFiltered,
       toggleActionsView,
@@ -1000,39 +1394,114 @@ export function PalettePage() {
             value={query}
             onValueChange={handleValueChange}
             onKeyDownCapture={(event) => {
-              if (!isClipboardMode || isActionsView || clipboardFiltered.length === 0) return
               if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return
-              event.preventDefault()
-              event.stopPropagation()
+              if (isActionsView) return
 
-              const currentIndex = clipboardFiltered.findIndex((entry) => entry.id === selectedClipboardId)
-              if (event.key === 'ArrowDown') {
-                const nextIndex = currentIndex >= clipboardFiltered.length - 1 ? 0 : currentIndex + 1
-                const nextId = clipboardFiltered[nextIndex]?.id
-                if (nextId) {
-                  setSelectedClipboardId(nextId)
-                  setSelectionScrollSignal((value) => value + 1)
+              if (isClipboardMode && clipboardFiltered.length > 0) {
+                event.preventDefault()
+                event.stopPropagation()
+                const currentIndex = clipboardFiltered.findIndex((entry) => entry.id === selectedClipboardId)
+                if (event.key === 'ArrowDown') {
+                  const nextIndex = currentIndex >= clipboardFiltered.length - 1 ? 0 : currentIndex + 1
+                  const nextId = clipboardFiltered[nextIndex]?.id
+                  if (nextId) {
+                    setSelectedClipboardId(nextId)
+                    setSelectionScrollSignal((value) => value + 1)
+                  }
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  const nextIndex = currentIndex <= 0 ? clipboardFiltered.length - 1 : currentIndex - 1
+                  const nextId = clipboardFiltered[nextIndex]?.id
+                  if (nextId) {
+                    setSelectedClipboardId(nextId)
+                    setSelectionScrollSignal((value) => value + 1)
+                  }
+                  return
+                }
+                if (event.key === 'Enter' && selectedClipboardId) {
+                  const selectedEntry = clipboardFiltered.find((entry) => entry.id === selectedClipboardId)
+                  if (selectedEntry) copyAndClose(selectedEntry)
                 }
                 return
               }
-              if (event.key === 'ArrowUp') {
-                const nextIndex = currentIndex <= 0 ? clipboardFiltered.length - 1 : currentIndex - 1
-                const nextId = clipboardFiltered[nextIndex]?.id
-                if (nextId) {
-                  setSelectedClipboardId(nextId)
-                  setSelectionScrollSignal((value) => value + 1)
+
+              if (isQuicklinksMode && quicklinksFiltered.length > 0) {
+                event.preventDefault()
+                event.stopPropagation()
+                const currentIndex = quicklinksFiltered.findIndex((q) => q.id === selectedQuicklinkId)
+                if (event.key === 'ArrowDown') {
+                  const nextIndex = currentIndex >= quicklinksFiltered.length - 1 ? 0 : currentIndex + 1
+                  const nextId = quicklinksFiltered[nextIndex]?.id
+                  if (nextId) {
+                    setSelectedQuicklinkId(nextId)
+                    setSelectionScrollSignal((value) => value + 1)
+                  }
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  const nextIndex = currentIndex <= 0 ? quicklinksFiltered.length - 1 : currentIndex - 1
+                  const nextId = quicklinksFiltered[nextIndex]?.id
+                  if (nextId) {
+                    setSelectedQuicklinkId(nextId)
+                    setSelectionScrollSignal((value) => value + 1)
+                  }
+                  return
+                }
+                if (event.key === 'Enter' && selectedQuicklinkId) {
+                  const link = quicklinksFiltered.find((q) => q.id === selectedQuicklinkId)
+                  if (link && isTauriRuntime()) {
+                    void import('@tauri-apps/plugin-shell').then(({ open }) => open(link.url))
+                    hideWindow()
+                  }
                 }
                 return
               }
-              if (event.key === 'Enter' && selectedClipboardId) {
-                const selectedEntry = clipboardFiltered.find((entry) => entry.id === selectedClipboardId)
-                if (selectedEntry) {
-                  copyAndClose(selectedEntry)
+
+              if (isSnippetsMode && snippetsFiltered.length > 0) {
+                event.preventDefault()
+                event.stopPropagation()
+                const currentIndex = snippetsFiltered.findIndex((s) => s.id === selectedSnippetId)
+                if (event.key === 'ArrowDown') {
+                  const nextIndex = currentIndex >= snippetsFiltered.length - 1 ? 0 : currentIndex + 1
+                  const nextId = snippetsFiltered[nextIndex]?.id
+                  if (nextId) {
+                    setSelectedSnippetId(nextId)
+                    setSelectionScrollSignal((value) => value + 1)
+                  }
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  const nextIndex = currentIndex <= 0 ? snippetsFiltered.length - 1 : currentIndex - 1
+                  const nextId = snippetsFiltered[nextIndex]?.id
+                  if (nextId) {
+                    setSelectedSnippetId(nextId)
+                    setSelectionScrollSignal((value) => value + 1)
+                  }
+                  return
+                }
+                if (event.key === 'Enter' && selectedSnippetId) {
+                  const selectedSnippet = snippetsFiltered.find((s) => s.id === selectedSnippetId)
+                  if (selectedSnippet && isTauriRuntime()) {
+                    void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+                      writeText(selectedSnippet.content),
+                    )
+                    void markSnippetUsed(selectedSnippet.id)
+                    hideWindow()
+                  }
                 }
               }
             }}
             placeholder={
-              isClipboardMode ? STRINGS.palette.filterPlaceholder : STRINGS.palette.placeholder
+              isClipboardMode
+                ? STRINGS.palette.filterPlaceholder
+                : isEmojiMode
+                  ? 'Search emoji & symbols…'
+                  : isQuicklinksMode
+                    ? 'Search for Quicklinks…'
+                    : isSnippetsMode
+                      ? 'Search snippets…'
+                      : STRINGS.palette.placeholder
             }
             className="text-foreground placeholder:text-muted-foreground h-10 flex-1 bg-transparent text-[15px] outline-none"
           />
@@ -1156,7 +1625,7 @@ export function PalettePage() {
               </div>
             )}
 
-            {isSnippetsMode && !isActionsView && (
+            {isSnippetsMode && (
             <>
               {snippetsFiltered.length === 0 && (
                 <div className="text-muted-foreground flex flex-col items-center gap-3 py-8 text-center text-sm">
@@ -1184,6 +1653,7 @@ export function PalettePage() {
                     <Command.Item
                       key={snippet.id}
                       value={`snippet-entry:${snippet.id}`}
+                      data-keyboard-selected={selectedSnippetId === snippet.id ? 'true' : undefined}
                       onSelect={() => {
                         if (!isTauriRuntime()) return
                         void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
@@ -1192,10 +1662,10 @@ export function PalettePage() {
                         void markSnippetUsed(snippet.id)
                         hideWindow()
                       }}
-                      className={cn(
-                        'text-foreground flex cursor-pointer items-center gap-3 text-sm',
-                        selectedSnippetId === snippet.id && 'data-[selected=true]:bg-accent',
-                      )}
+                        className={cn(
+                          'text-foreground flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm',
+                          selectedSnippetId === snippet.id && 'keyboard-selected',
+                        )}
                     >
                       <FileText className="h-4 w-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
                       <span className="min-w-0 flex-1 truncate">{snippet.name}</span>
@@ -1208,6 +1678,120 @@ export function PalettePage() {
               )}
             </>
           )}
+
+            {isEmojiMode && !isActionsView && (
+              <>
+                {emojiFlatList.length === 0 && (
+                  <div className="text-muted-foreground flex flex-col items-center gap-3 py-8 text-center text-sm">
+                    <p>No emojis match your search.</p>
+                    <p className="text-xs">Try &quot;smile&quot;, &quot;fire&quot;, &quot;heart&quot;</p>
+                  </div>
+                )}
+                {emojiFlatList.length > 0 && (
+                  <div className="flex flex-col gap-4 py-2">
+                    {(() => {
+                      let flatIndex = 0
+                      return emojiGridSections.map((section) => (
+                        <div key={section.title} className="flex flex-col gap-1.5">
+                          <h3 className="text-muted-foreground px-1 text-xs font-medium">
+                            {section.title} {section.count}
+                          </h3>
+                          <div
+                            className="grid gap-0.5 px-1"
+                            style={{ gridTemplateColumns: 'repeat(8, 1fr)' }}
+                          >
+                            {section.entries.map((entry) => {
+                              const currentIndex = flatIndex++
+                              const isSelected = currentIndex === selectedEmojiIndex
+                              return (
+                                <button
+                                  key={`${entry.emoji}-${currentIndex}`}
+                                  type="button"
+                                  aria-label={entry.name}
+                                  data-emoji-selected={isSelected ? true : undefined}
+                                  className={cn(
+                                    'flex h-9 w-9 cursor-pointer items-center justify-center rounded text-xl transition-colors',
+                                    isSelected
+                                      ? 'bg-accent ring-1 ring-border'
+                                      : 'hover:bg-muted/60',
+                                  )}
+                                  onClick={() => {
+                                    if (!isTauriRuntime()) return
+                                    void import('@tauri-apps/plugin-clipboard-manager').then(
+                                      ({ writeText }) => writeText(entry.emoji),
+                                    )
+                                    markEmojiUsed(entry.emoji)
+                                    toast.success('Emoji copied to clipboard')
+                                    hideWindow()
+                                  }}
+                                  onFocus={() => setSelectedEmojiIndex(currentIndex)}
+                                >
+                                  {entry.emoji}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))
+                    })()}
+                  </div>
+                )}
+              </>
+            )}
+
+            {isQuicklinksMode && (
+              <>
+                {quicklinksFiltered.length === 0 && (
+                  <div className="text-muted-foreground flex flex-col items-center gap-3 py-8 text-center text-sm">
+                    <p>No quick links yet.</p>
+                    <Button
+                      size="sm"
+                      variant="muted"
+                      className="gap-2"
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          window.localStorage.setItem('kikko:settings:focus-section', 'quicklinks')
+                        }
+                        void openSettingsWindow()
+                        hideWindow()
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden />
+                      Create Quicklink
+                    </Button>
+                  </div>
+                )}
+                {quicklinksFiltered.length > 0 && (
+                  <Command.Group heading="Quick Links">
+                    {quicklinksFiltered.map((q) => (
+                      <Command.Item
+                        key={q.id}
+                        value={`quicklink:${q.id}`}
+                        data-keyboard-selected={selectedQuicklinkId === q.id ? 'true' : undefined}
+                        data-quicklink-selected={selectedQuicklinkId === q.id ? true : undefined}
+                        onSelect={() => {
+                          if (!isTauriRuntime()) return
+                          void import('@tauri-apps/plugin-shell').then(({ open }) =>
+                            open(q.url),
+                          )
+                          hideWindow()
+                        }}
+                        className={cn(
+                          'text-foreground flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm',
+                          selectedQuicklinkId === q.id && 'keyboard-selected',
+                        )}
+                      >
+                        <Link className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden />
+                        <span className="min-w-0 flex-1 truncate">{q.name}</span>
+                        <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
+                          {q.url}
+                        </span>
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                )}
+              </>
+            )}
 
           {isRootMode && isLoading && (
             <div className="text-muted-foreground py-4 text-center text-sm">

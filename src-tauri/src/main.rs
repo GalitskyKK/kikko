@@ -123,6 +123,10 @@ fn main() {
       commands::snippets::update_snippet,
       commands::snippets::delete_snippet,
       commands::snippets::mark_snippet_used,
+      commands::quicklinks::get_quicklinks,
+      commands::quicklinks::create_quicklink,
+      commands::quicklinks::update_quicklink,
+      commands::quicklinks::delete_quicklink,
       commands::system::exit_app,
       commands::system::show_palette_or_toggle,
     ])

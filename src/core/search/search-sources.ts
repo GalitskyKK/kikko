@@ -2,6 +2,7 @@ import type { SearchableWithAction } from './search-types'
 import { getPluginSearchables } from '@/core/plugins/plugin-searchables'
 import { useClipboardStore } from '@/stores/clipboard-store'
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
+import { useQuicklinkStore } from '@/stores/quicklink-store'
 import { useSnippetStore } from '@/stores/snippet-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { isTauriRuntime } from '@/lib/tauri'
@@ -107,9 +108,15 @@ export function looksLikeMath(query: string): boolean {
   return /^[\d\s+\-*/().%\s]+$/.test(trimmed)
 }
 
+export type GetSearchablesOptions = {
+  navigate: (path: string) => void
+  hideWindow: () => void
+  openPaletteMode?: (mode: 'emoji' | 'quicklinks') => void
+}
+
 export async function getSearchables(
   _query: string,
-  options: { navigate: (path: string) => void; hideWindow: () => void },
+  options: GetSearchablesOptions,
 ): Promise<SearchableWithAction[]> {
   const { hideWindow } = options
   const list: SearchableWithAction[] = []
@@ -177,7 +184,7 @@ export async function getSearchables(
         },
       })
     }
-    list.push(...getPluginSearchables({ hideWindow }))
+    list.push(...getPluginSearchables({ hideWindow, openPaletteMode: options.openPaletteMode }))
 
     try {
       if (enabledExtensions.clipboard) {
@@ -233,6 +240,32 @@ export async function getSearchables(
       }
     } catch (err) {
       logger.warn('snippets in getSearchables', { error: err })
+    }
+
+    try {
+      const quicklinks = useQuicklinkStore.getState().quicklinks
+      for (const q of quicklinks) {
+        const keywords = [q.name, q.url, ...q.tags].filter(Boolean)
+        list.push({
+          item: {
+            id: q.id,
+            type: 'plugin',
+            section: 'plugin',
+            title: q.name,
+            subtitle: q.url,
+            keywords,
+          },
+          score: 0.85,
+          action: () => {
+            if (isTauriRuntime()) {
+              void import('@tauri-apps/plugin-shell').then(({ open }) => open(q.url))
+            }
+            hideWindow()
+          },
+        })
+      }
+    } catch (err) {
+      logger.warn('quicklinks in getSearchables', { error: err })
     }
 
     if (isTauriRuntime()) {

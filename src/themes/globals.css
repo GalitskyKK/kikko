@@ -139,18 +139,30 @@
     transition: none !important;
   }
 
-  [cmdk-item]:not([data-selected="true"]):hover {
+  [cmdk-item]:not([data-selected="true"]):not([data-keyboard-selected="true"]):hover {
     background: hsl(var(--accent) / 0.86);
     border-color: hsl(var(--ring) / 0.46);
   }
-  [cmdk-item][data-selected="true"] {
+  [cmdk-item][data-selected="true"],
+  [cmdk-item][data-keyboard-selected="true"] {
     background: hsl(var(--accent) / 0.98);
     border-color: hsl(var(--ring) / 0.62);
     box-shadow: 0 0 0 1px hsl(var(--ring) / 0.48);
   }
-  .dark [cmdk-item][data-selected="true"] {
+  .dark [cmdk-item][data-selected="true"],
+  .dark [cmdk-item][data-keyboard-selected="true"] {
     background: linear-gradient(90deg, hsl(var(--accent) / 0.92) 0%, hsl(var(--accent) / 0.64) 100%);
     border-color: hsl(var(--ring) / 0.36);
+  }
+  /* Подсветка выбора стрелками (state в палетке), если data-атрибут не на [cmdk-item] */
+  .palette-panel .keyboard-selected {
+    background: hsl(var(--accent) / 0.98) !important;
+    border-color: hsl(var(--ring) / 0.62) !important;
+    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.48);
+  }
+  .dark .palette-panel .keyboard-selected {
+    background: linear-gradient(90deg, hsl(var(--accent) / 0.92) 0%, hsl(var(--accent) / 0.64) 100%) !important;
+    border-color: hsl(var(--ring) / 0.36) !important;
   }
   [cmdk-group] {
     overflow: visible;

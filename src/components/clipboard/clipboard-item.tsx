@@ -1,5 +1,5 @@
-import { Pin, Star, Trash2 } from 'lucide-react'
-import { IconButton } from '@/components/ui/icon-button'
+// import { Pin, Star, Trash2 } from 'lucide-react'
+// import { IconButton } from '@/components/ui/icon-button'
 import { ClipboardPreview } from '@/components/clipboard/clipboard-preview'
 import type { ClipboardEntry } from '@/stores/clipboard-store'
 import { cn } from '@/utils/cn'
@@ -19,9 +19,9 @@ export function ClipboardItem({
   entry,
   selected,
   onSelect,
-  onToggleFavorite,
-  onTogglePinned,
-  onDelete,
+  // onToggleFavorite,
+  // onTogglePinned,
+  // onDelete,
 }: ClipboardItemProps) {
   return (
     <div
@@ -48,7 +48,7 @@ export function ClipboardItem({
           {entry.charCount > 0 ? ` • ${entry.charCount} chars` : ''}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+      {/* <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
         <IconButton
           size="sm"
           aria-label={entry.isPinned ? 'Unpin entry' : 'Pin entry'}
@@ -81,7 +81,7 @@ export function ClipboardItem({
         >
           <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </IconButton>
-      </div>
+      </div> */}
     </div>
   )
 }

@@ -16,6 +16,7 @@ import {
   useClipboardStore,
   type ClipboardEntryRaw,
 } from '@/stores/clipboard-store'
+import { useQuicklinkStore } from '@/stores/quicklink-store'
 import { useSnippetStore } from '@/stores/snippet-store'
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { useSettingsStore } from '@/stores/settings-store'
@@ -104,6 +105,7 @@ function usePreloadSearchData() {
     if (!isTauriRuntime()) return
     void useClipboardStore.getState().loadFromBackend()
     void useSnippetStore.getState().loadFromBackend()
+    void useQuicklinkStore.getState().loadFromBackend()
     void useInstalledAppsStore.getState().loadApps()
   }, [])
 }

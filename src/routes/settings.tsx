@@ -1,6 +1,7 @@
 import {
   Check,
   Keyboard,
+  Link,
   Monitor,
   Moon,
   Palette,
@@ -19,6 +20,7 @@ import { Panel } from '@/components/ui/panel'
 import { isTauriRuntime } from '@/lib/tauri'
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { usePluginStore } from '@/stores/plugin-store'
+import { useQuicklinkStore } from '@/stores/quicklink-store'
 import { useSnippetStore } from '@/stores/snippet-store'
 import { useSettingsStore, type AccentPreset, type UiDensity } from '@/stores/settings-store'
 
@@ -47,6 +49,11 @@ export function SettingsPage() {
   const createSnippet = useSnippetStore((state) => state.createSnippet)
   const updateSnippet = useSnippetStore((state) => state.updateSnippet)
   const deleteSnippet = useSnippetStore((state) => state.deleteSnippet)
+  const quicklinks = useQuicklinkStore((state) => state.quicklinks)
+  const loadQuicklinks = useQuicklinkStore((state) => state.loadFromBackend)
+  const createQuicklink = useQuicklinkStore((state) => state.createQuicklink)
+  const updateQuicklink = useQuicklinkStore((state) => state.updateQuicklink)
+  const deleteQuicklink = useQuicklinkStore((state) => state.deleteQuicklink)
   const plugins = usePluginStore((state) => state.plugins)
   const [snippetEditorId, setSnippetEditorId] = useState<string | null>(null)
   const [snippetName, setSnippetName] = useState('')
@@ -57,7 +64,13 @@ export function SettingsPage() {
   const [aliasTargetId, setAliasTargetId] = useState('')
   const [aliasValue, setAliasValue] = useState('')
   const [aliasError, setAliasError] = useState('')
+  const [quicklinkEditorId, setQuicklinkEditorId] = useState<string | null>(null)
+  const [quicklinkName, setQuicklinkName] = useState('')
+  const [quicklinkUrl, setQuicklinkUrl] = useState('')
+  const [quicklinkTags, setQuicklinkTags] = useState('')
+  const [quicklinkError, setQuicklinkError] = useState('')
   const snippetNameInputRef = useRef<HTMLInputElement>(null)
+  const quicklinkNameInputRef = useRef<HTMLInputElement>(null)
 
   const runtimePlugins = usePluginStore((state) => state.runtimePlugins)
   const runtimeErrors = usePluginStore((state) => state.runtimeErrors)
@@ -78,7 +91,8 @@ export function SettingsPage() {
     if (!isTauriRuntime()) return
     void loadApps()
     void loadSnippets()
-  }, [loadApps, loadSnippets])
+    void loadQuicklinks()
+  }, [loadApps, loadSnippets, loadQuicklinks])
 
   useEffect(() => {
     if (!isTauriRuntime()) return
@@ -181,24 +195,94 @@ export function SettingsPage() {
     }
   }
 
+  const handleQuicklinkEdit = (id: string) => {
+    const q = quicklinks.find((item) => item.id === id)
+    if (!q) return
+    setQuicklinkEditorId(q.id)
+    setQuicklinkName(q.name)
+    setQuicklinkUrl(q.url)
+    setQuicklinkTags(q.tags.join(', '))
+    setQuicklinkError('')
+  }
+
+  const resetQuicklinkForm = () => {
+    setQuicklinkEditorId(null)
+    setQuicklinkName('')
+    setQuicklinkUrl('')
+    setQuicklinkTags('')
+    setQuicklinkError('')
+  }
+
+  const handleQuicklinkSave = async () => {
+    const name = quicklinkName.trim()
+    const url = quicklinkUrl.trim()
+    if (!name || !url) {
+      setQuicklinkError('Name and URL are required.')
+      return
+    }
+    const tags = quicklinkTags
+      .split(',')
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+    const saved = quicklinkEditorId
+      ? await updateQuicklink({ id: quicklinkEditorId, name, url, tags })
+      : await createQuicklink({ name, url, tags })
+    if (!saved) {
+      setQuicklinkError('Failed to save. Check URL (must start with http:// or https://).')
+      return
+    }
+    if (isTauriRuntime()) {
+      void import('@tauri-apps/api/event').then(({ emit }) => {
+        void emit('kikko:quicklinks-updated')
+      })
+    }
+    resetQuicklinkForm()
+  }
+
+  const handleQuicklinkDelete = async (id: string) => {
+    await deleteQuicklink(id)
+    if (quicklinkEditorId === id) resetQuicklinkForm()
+    if (isTauriRuntime()) {
+      void import('@tauri-apps/api/event').then(({ emit }) => {
+        void emit('kikko:quicklinks-updated')
+      })
+    }
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return
     const fromPalette = window.localStorage.getItem('kikko:settings:focus-section')
-    if (fromPalette !== 'snippets') return
     window.localStorage.removeItem('kikko:settings:focus-section')
-    setSnippetEditorId(null)
-    setSnippetName('')
-    setSnippetKeyword('')
-    setSnippetContent('')
-    setSnippetCategory('general')
-    setSnippetError('')
-    requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>('[data-settings-section="snippets"]')?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
+    if (fromPalette === 'snippets') {
+      setSnippetEditorId(null)
+      setSnippetName('')
+      setSnippetKeyword('')
+      setSnippetContent('')
+      setSnippetCategory('general')
+      setSnippetError('')
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[data-settings-section="snippets"]')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+        snippetNameInputRef.current?.focus()
       })
-      snippetNameInputRef.current?.focus()
-    })
+      return
+    }
+    if (fromPalette === 'quicklinks') {
+      setQuicklinkEditorId(null)
+      setQuicklinkName('')
+      setQuicklinkUrl('')
+      setQuicklinkTags('')
+      setQuicklinkError('')
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[data-settings-section="quicklinks"]')?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+        quicklinkNameInputRef.current?.focus()
+      })
+    }
   }, [])
 
   const handleAliasSave = () => {
@@ -259,7 +343,7 @@ export function SettingsPage() {
           />
         </Panel>
 
-        <Panel className="space-y-4 p-4" data-settings-section="snippets">
+        <Panel className="space-y-4 p-4">
           <div>
             <h2 className="text-foreground text-sm font-semibold">Appearance</h2>
             <p className="text-muted-foreground text-xs">Theme, density and visual behavior.</p>
@@ -437,7 +521,7 @@ export function SettingsPage() {
           />
         </Panel>
 
-        <Panel className="space-y-4 p-4">
+        <Panel className="space-y-4 p-4" data-settings-section="snippets">
           <div>
             <h2 className="text-foreground text-sm font-semibold">Snippets</h2>
             <p className="text-muted-foreground text-xs">
@@ -525,6 +609,98 @@ export function SettingsPage() {
                   </div>
                 </div>
                 <p className="text-muted-foreground mt-2 line-clamp-2 text-xs">{snippet.content}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel className="space-y-4 p-4" data-settings-section="quicklinks">
+          <div>
+            <h2 className="text-foreground flex items-center gap-2 text-sm font-semibold">
+              <Link className="text-muted-foreground h-4 w-4" aria-hidden />
+              Quick Links
+            </h2>
+            <p className="text-muted-foreground text-xs">
+              Save links and open them from the palette. Use placeholders like {'{argument}'} in URL for future support.
+            </p>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            <input
+              ref={quicklinkNameInputRef}
+              type="text"
+              value={quicklinkName}
+              onChange={(e) => setQuicklinkName(e.target.value)}
+              placeholder="Quicklink name"
+              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+            />
+            <input
+              type="text"
+              value={quicklinkUrl}
+              onChange={(e) => setQuicklinkUrl(e.target.value)}
+              placeholder="https://…"
+              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+            />
+          </div>
+          <input
+            type="text"
+            value={quicklinkTags}
+            onChange={(e) => setQuicklinkTags(e.target.value)}
+            placeholder="Tags (comma-separated)"
+            className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+          />
+          {quicklinkError && <p className="text-destructive text-xs">{quicklinkError}</p>}
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="muted"
+              onClick={() => void handleQuicklinkSave()}
+              className="gap-2"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              {quicklinkEditorId ? 'Update Quicklink' : 'Create Quicklink'}
+            </Button>
+            {quicklinkEditorId && (
+              <Button size="sm" variant="ghost" onClick={resetQuicklinkForm}>
+                Cancel edit
+              </Button>
+            )}
+          </div>
+          <div className="space-y-2">
+            {quicklinks.length === 0 && (
+              <p className="text-muted-foreground text-xs">No quick links. Create one to open from the palette.</p>
+            )}
+            {quicklinks.map((q) => (
+              <div
+                key={q.id}
+                className="border-border/70 bg-background/60 rounded-lg border px-3 py-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-foreground truncate text-sm font-medium">{q.name}</p>
+                    <p className="text-muted-foreground truncate text-[11px]">{q.url}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2"
+                      onClick={() => handleQuicklinkEdit(q.id)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:bg-destructive/10 h-7 px-2"
+                      onClick={() => void handleQuicklinkDelete(q.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                  </div>
+                </div>
+                {q.tags.length > 0 && (
+                  <p className="text-muted-foreground mt-2 text-xs">{q.tags.join(', ')}</p>
+                )}
               </div>
             ))}
           </div>
