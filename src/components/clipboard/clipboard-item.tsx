@@ -29,10 +29,16 @@ export function ClipboardItem({
       role="option"
       aria-selected={selected}
       className={cn(
-        'group flex min-h-[58px] cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2 text-sm transition-colors',
-        selected ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-accent/70',
+        'group flex min-h-[58px] cursor-pointer items-center gap-3 rounded-xl border px-2.5 py-2 text-sm transition-colors',
+        selected
+          ? 'border-ring/60 bg-accent text-accent-foreground shadow-[0_0_0_1px_hsl(var(--ring)/0.35)]'
+          : 'border-transparent text-foreground hover:bg-accent/70',
       )}
-      onClick={onSelect}
+      onMouseDown={(event) => {
+        // Не даём инпуту потерять фокус при клике — как в Raycast.
+        event.preventDefault()
+        onSelect()
+      }}
     >
       <ClipboardPreview entry={entry} />
       <div className="min-w-0 flex-1">

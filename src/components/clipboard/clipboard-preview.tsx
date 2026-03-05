@@ -58,7 +58,7 @@ export function ClipboardPreview({ entry }: ClipboardPreviewProps) {
 export function ClipboardDetailPreview({ entry }: ClipboardDetailPreviewProps) {
   if (!entry) {
     return (
-      <div className="hidden min-h-[260px] rounded-xl border border-border/60 bg-muted/20 p-3 md:block">
+      <div className="h-full min-h-0 rounded-xl border border-border/60 bg-muted/20 p-3">
         <p className="text-xs text-muted-foreground">Select an item to preview details.</p>
       </div>
     )
@@ -77,7 +77,7 @@ export function ClipboardDetailPreview({ entry }: ClipboardDetailPreviewProps) {
   ]
 
   return (
-    <aside className="hidden min-h-[260px] rounded-xl border border-border/60 bg-muted/20 p-3 md:flex md:flex-col md:gap-3">
+    <aside className="flex h-full min-h-0 flex-col gap-3 rounded-xl border border-border/60 bg-muted/20 p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{getTypeLabel(entry)} preview</p>
         <span className="text-[11px] text-muted-foreground">

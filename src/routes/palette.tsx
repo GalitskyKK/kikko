@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from 'framer-motion'
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Command } from 'cmdk'
@@ -94,6 +93,8 @@ export function PalettePage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const searchRequestIdRef = useRef(0)
   const geometryRequestIdRef = useRef(0)
+  const clipboardFilteredRef = useRef<ClipboardEntry[]>([])
+  const selectedClipboardIdRef = useRef<string | null>(null)
 
   const { results, setResults, setLoading, isLoading } = useSearchStore()
   const showStartSuggestions = useSettingsStore((state) => state.general.showStartSuggestions)
@@ -174,6 +175,7 @@ export function PalettePage() {
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     if (params.get('mode') === 'clipboard') {
+      setQuery('')
       setMode('clipboard')
       return
     }
@@ -240,7 +242,10 @@ export function PalettePage() {
               title: STRINGS.palette.clipboardHistory,
               subtitle: 'Kikkō',
               score: 0.95,
-              action: () => setMode('clipboard'),
+              action: () => {
+                setQuery('')
+                setMode('clipboard')
+              },
             })
           }
           if (
@@ -410,8 +415,7 @@ export function PalettePage() {
   const shouldShowStartSuggestions =
     isRootMode && isEmptyQuery && showStartSuggestions && !isLoading
   /** В компактном режиме (без саджестов) при пустом запросе показываем только строку поиска */
-  const isCompactEmpty =
-    isRootMode && isEmptyQuery && !showStartSuggestions
+  const isCompactEmpty = isRootMode && isEmptyQuery && !showStartSuggestions
   const isActionsView = paletteView === 'actions'
 
   const applyPaletteGeometry = useCallback(() => {
@@ -496,8 +500,25 @@ export function PalettePage() {
       setSelectedClipboardId(null)
       return
     }
-    setSelectedClipboardId((current) => current ?? clipboardFiltered[0]?.id ?? null)
+    setSelectedClipboardId((current) => {
+      const firstId = clipboardFiltered[0]?.id ?? null
+      const stillValid = current && clipboardFiltered.some((e) => e.id === current)
+      return stillValid ? current : firstId
+    })
   }, [clipboardFiltered, isClipboardMode])
+
+  useEffect(() => {
+    clipboardFilteredRef.current = clipboardFiltered
+  }, [clipboardFiltered])
+
+  useEffect(() => {
+    selectedClipboardIdRef.current = selectedClipboardId
+  }, [selectedClipboardId])
+
+  useEffect(() => {
+    if (!isClipboardMode) return
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }, [isClipboardMode])
 
   useEffect(() => {
     if (!isSnippetsMode || snippetsFiltered.length === 0) {
@@ -604,7 +625,10 @@ export function PalettePage() {
               subtitle: 'Kikkō',
               icon: ClipboardList,
               iconClassName: 'text-sky-500 dark:text-sky-400',
-              action: () => setMode('clipboard'),
+              action: () => {
+                setQuery('')
+                setMode('clipboard')
+              },
             },
           ]
         : []),
@@ -921,34 +945,7 @@ export function PalettePage() {
         }
         return
       }
-      if (!isClipboardMode || clipboardFiltered.length === 0) return
-
-      const currentIndex = clipboardFiltered.findIndex((entry) => entry.id === selectedClipboardId)
-      if (event.key === 'ArrowDown') {
-        event.preventDefault()
-        const nextIndex = currentIndex >= clipboardFiltered.length - 1 ? 0 : currentIndex + 1
-        const nextId = clipboardFiltered[nextIndex]?.id
-        if (nextId) {
-          setSelectedClipboardId(nextId)
-          setSelectionScrollSignal((value) => value + 1)
-        }
-      }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault()
-        const nextIndex = currentIndex <= 0 ? clipboardFiltered.length - 1 : currentIndex - 1
-        const nextId = clipboardFiltered[nextIndex]?.id
-        if (nextId) {
-          setSelectedClipboardId(nextId)
-          setSelectionScrollSignal((value) => value + 1)
-        }
-      }
-      if (event.key === 'Enter' && selectedClipboardId) {
-        event.preventDefault()
-        const selectedEntry = clipboardFiltered.find((entry) => entry.id === selectedClipboardId)
-        if (selectedEntry) {
-          copyAndClose(selectedEntry)
-        }
-      }
+      if (isClipboardMode) return
     },
     [
       activeActions,
@@ -1002,6 +999,38 @@ export function PalettePage() {
             ref={inputRef}
             value={query}
             onValueChange={handleValueChange}
+            onKeyDownCapture={(event) => {
+              if (!isClipboardMode || isActionsView || clipboardFiltered.length === 0) return
+              if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return
+              event.preventDefault()
+              event.stopPropagation()
+
+              const currentIndex = clipboardFiltered.findIndex((entry) => entry.id === selectedClipboardId)
+              if (event.key === 'ArrowDown') {
+                const nextIndex = currentIndex >= clipboardFiltered.length - 1 ? 0 : currentIndex + 1
+                const nextId = clipboardFiltered[nextIndex]?.id
+                if (nextId) {
+                  setSelectedClipboardId(nextId)
+                  setSelectionScrollSignal((value) => value + 1)
+                }
+                return
+              }
+              if (event.key === 'ArrowUp') {
+                const nextIndex = currentIndex <= 0 ? clipboardFiltered.length - 1 : currentIndex - 1
+                const nextId = clipboardFiltered[nextIndex]?.id
+                if (nextId) {
+                  setSelectedClipboardId(nextId)
+                  setSelectionScrollSignal((value) => value + 1)
+                }
+                return
+              }
+              if (event.key === 'Enter' && selectedClipboardId) {
+                const selectedEntry = clipboardFiltered.find((entry) => entry.id === selectedClipboardId)
+                if (selectedEntry) {
+                  copyAndClose(selectedEntry)
+                }
+              }
+            }}
             placeholder={
               isClipboardMode ? STRINGS.palette.filterPlaceholder : STRINGS.palette.placeholder
             }
@@ -1028,74 +1057,106 @@ export function PalettePage() {
           )}
         </div>
 
-        <Command.List
-          className={cn(
-            'px-2 py-2 min-h-0 flex-1 overflow-y-auto pb-14',
-            isCompactEmpty && 'hidden',
-          )}
-        >
-          {pendingDangerousResult && (
-            <div className="border-warning/45 bg-warning/10 mb-2 rounded-lg border px-3 py-2">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="text-warning mt-0.5 h-4 w-4 shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-foreground text-xs font-medium">Confirm critical command</p>
-                  <p className="text-muted-foreground text-xs">{pendingDangerousResult.title}</p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="muted"
-                    className="h-7 px-2 text-[11px]"
-                    onClick={() => {
-                      runResultAction(pendingDangerousResult)
-                      setPendingDangerousResult(null)
-                    }}
-                  >
-                    Run
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-[11px]"
-                    onClick={() => setPendingDangerousResult(null)}
-                  >
-                    Cancel
-                  </Button>
+        {isClipboardMode ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-2">
+            {pendingDangerousResult && (
+              <div className="border-warning/45 bg-warning/10 mb-2 rounded-lg border px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="text-warning mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-foreground text-xs font-medium">Confirm critical command</p>
+                    <p className="text-muted-foreground text-xs">{pendingDangerousResult.title}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="muted"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => {
+                        runResultAction(pendingDangerousResult)
+                        setPendingDangerousResult(null)
+                      }}
+                    >
+                      Run
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setPendingDangerousResult(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-          {isClipboardMode && !isActionsView && (
-            <>
-              {clipboardLoading && (
-                <div className="text-muted-foreground py-4 text-center text-sm">
-                  {STRINGS.palette.loading}
+            )}
+            {clipboardLoading && (
+              <div className="text-muted-foreground py-4 text-center text-sm">
+                {STRINGS.palette.loading}
+              </div>
+            )}
+            {!clipboardLoading && clipboardFiltered.length === 0 && (
+              <div className="text-muted-foreground py-8 text-center text-sm">
+                {STRINGS.palette.clipboardEmpty}
+              </div>
+            )}
+            {!clipboardLoading && clipboardFiltered.length > 0 && (
+              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,320px)_minmax(0,1fr)] gap-3 overflow-hidden">
+                <ClipboardEntriesList
+                  entries={clipboardFiltered}
+                  selectedId={selectedClipboardId}
+                  scrollToSelectedSignal={selectionScrollSignal}
+                  onSelect={(entry) => setSelectedClipboardId(entry.id)}
+                  onToggleFavorite={(entryId) => void toggleFavoriteInBackend(entryId)}
+                  onTogglePinned={(entryId) => void togglePinnedInBackend(entryId)}
+                  onDelete={(entryId) => void deleteInBackend(entryId)}
+                />
+                <ClipboardDetailPreview entry={selectedClipboardEntry} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <Command.List
+            className={cn(
+              'min-h-0 flex-1 overflow-y-auto scroll-auto px-2 py-2 pb-14',
+              isCompactEmpty && 'hidden',
+            )}
+          >
+            {pendingDangerousResult && (
+              <div className="border-warning/45 bg-warning/10 mb-2 rounded-lg border px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="text-warning mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-foreground text-xs font-medium">Confirm critical command</p>
+                    <p className="text-muted-foreground text-xs">{pendingDangerousResult.title}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="muted"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => {
+                        runResultAction(pendingDangerousResult)
+                        setPendingDangerousResult(null)
+                      }}
+                    >
+                      Run
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setPendingDangerousResult(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
-              )}
-              {!clipboardLoading && clipboardFiltered.length === 0 && (
-                <div className="text-muted-foreground py-8 text-center text-sm">
-                  {STRINGS.palette.clipboardEmpty}
-                </div>
-              )}
-              {!clipboardLoading && clipboardFiltered.length > 0 && (
-                <div className="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_300px]">
-                  <ClipboardEntriesList
-                    entries={clipboardFiltered}
-                    selectedId={selectedClipboardId}
-                    scrollToSelectedSignal={selectionScrollSignal}
-                    onSelect={copyAndClose}
-                    onToggleFavorite={(entryId) => void toggleFavoriteInBackend(entryId)}
-                    onTogglePinned={(entryId) => void togglePinnedInBackend(entryId)}
-                    onDelete={(entryId) => void deleteInBackend(entryId)}
-                  />
-                  <ClipboardDetailPreview entry={selectedClipboardEntry} />
-                </div>
-              )}
-            </>
-          )}
+              </div>
+            )}
 
-          {isSnippetsMode && !isActionsView && (
+            {isSnippetsMode && !isActionsView && (
             <>
               {snippetsFiltered.length === 0 && (
                 <div className="text-muted-foreground flex flex-col items-center gap-3 py-8 text-center text-sm">
@@ -1228,39 +1289,30 @@ export function PalettePage() {
                   if (items.length === 0) return null
                   return (
                     <Command.Group key={group} heading={getGroupLabel(group)}>
-                      <AnimatePresence mode="popLayout">
-                        {items.map((result, index) => (
-                          <motion.div
-                            key={`${group}-${result.id}`}
-                            layout
-                            initial={{ opacity: 0, y: 4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.15, delay: index * 0.015 }}
+                      {items.map((result) => (
+                        <div key={`${group}-${result.id}`}>
+                          <Command.Item
+                            value={`result:${result.id}`}
+                            onSelect={() => selectSearchResult(result)}
+                            className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
                           >
-                            <Command.Item
-                              value={`result:${result.id}`}
-                              onSelect={() => selectSearchResult(result)}
-                              className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
-                            >
-                              <ResultIcon result={result} showAppIcons={showAppIcons} />
-                              <span className="min-w-0 flex-1 truncate">{result.title}</span>
-                              {result.subtitle &&
-                                !(
-                                  result.type === 'app' &&
-                                  result.subtitle.toLowerCase() === 'application'
-                                ) && (
-                                  <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
-                                    {result.subtitle}
-                                  </span>
-                                )}
-                              <span className="bg-muted/70 text-muted-foreground shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-                                {getCategoryLabel(result.type)}
-                              </span>
-                            </Command.Item>
-                          </motion.div>
-                        ))}
-                      </AnimatePresence>
+                            <ResultIcon result={result} showAppIcons={showAppIcons} />
+                            <span className="min-w-0 flex-1 truncate">{result.title}</span>
+                            {result.subtitle &&
+                              !(
+                                result.type === 'app' &&
+                                result.subtitle.toLowerCase() === 'application'
+                              ) && (
+                                <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
+                                  {result.subtitle}
+                                </span>
+                              )}
+                            <span className="bg-muted/70 text-muted-foreground shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+                              {getCategoryLabel(result.type)}
+                            </span>
+                          </Command.Item>
+                        </div>
+                      ))}
                     </Command.Group>
                   )
                 })}
@@ -1294,7 +1346,8 @@ export function PalettePage() {
               )}
             </>
           )}
-        </Command.List>
+          </Command.List>
+        )}
 
         {isActionsView && activeActions.length > 0 && (
           <div className="pointer-events-none absolute right-3 bottom-12 z-20 w-[280px]">
@@ -1336,71 +1389,71 @@ export function PalettePage() {
         )}
 
         {!isCompactEmpty && (
-        <div className="border-border/70 text-muted-foreground flex shrink-0 items-center justify-between border-t px-3 py-2 text-[11px]">
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                if (isClipboardMode && selectedClipboardEntry) {
-                  copyAndClose(selectedClipboardEntry)
-                  return
-                }
-                if (selectedCommandValue === 'calc-copy' && calcResult && isTauriRuntime()) {
-                  setLastClipboardContent(calcResult.value)
-                  void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
-                    writeText(calcResult.value),
-                  )
-                  hideWindow()
-                  return
-                }
-                if (selectedSearchResult) {
-                  selectSearchResult(selectedSearchResult)
-                  return
-                }
-                if (selectedStartSuggestion) {
-                  selectedStartSuggestion.action()
-                  return
-                }
-                results[0]?.action()
-              }}
-              className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
-            >
-              {isClipboardMode
-                ? STRINGS.palette.actionPaste
-                : selectedCommandValue === 'calc-copy' && calcResult
-                  ? STRINGS.palette.copyAnswer
-                  : STRINGS.palette.openCommand}
-            </Button>
-            {isClipboardMode && (
+          <div className="border-border/70 text-muted-foreground flex shrink-0 items-center justify-between border-t px-3 py-2 text-[11px]">
+            <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => void clearInBackend()}
+                onClick={() => {
+                  if (isClipboardMode && selectedClipboardEntry) {
+                    copyAndClose(selectedClipboardEntry)
+                    return
+                  }
+                  if (selectedCommandValue === 'calc-copy' && calcResult && isTauriRuntime()) {
+                    setLastClipboardContent(calcResult.value)
+                    void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+                      writeText(calcResult.value),
+                    )
+                    hideWindow()
+                    return
+                  }
+                  if (selectedSearchResult) {
+                    selectSearchResult(selectedSearchResult)
+                    return
+                  }
+                  if (selectedStartSuggestion) {
+                    selectedStartSuggestion.action()
+                    return
+                  }
+                  results[0]?.action()
+                }}
                 className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
               >
-                {STRINGS.palette.clearAll}
+                {isClipboardMode
+                  ? STRINGS.palette.actionPaste
+                  : selectedCommandValue === 'calc-copy' && calcResult
+                    ? STRINGS.palette.copyAnswer
+                    : STRINGS.palette.openCommand}
               </Button>
-            )}
+              {isClipboardMode && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void clearInBackend()}
+                  className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
+                >
+                  {STRINGS.palette.clearAll}
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-pressed={isActionsView}
+                onClick={toggleActionsView}
+                className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
+              >
+                {STRINGS.palette.actions}
+              </Button>
+              <Kbd>Ctrl K</Kbd>
+              {!isClipboardMode && commandExplainText && (
+                <span className="text-muted-foreground/95 ml-1 max-w-[220px] truncate text-[10px]">
+                  {commandExplainText}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-pressed={isActionsView}
-              onClick={toggleActionsView}
-              className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
-            >
-              {STRINGS.palette.actions}
-            </Button>
-            <Kbd>Ctrl K</Kbd>
-            {!isClipboardMode && commandExplainText && (
-              <span className="text-muted-foreground/95 ml-1 max-w-[220px] truncate text-[10px]">
-                {commandExplainText}
-              </span>
-            )}
-          </div>
-        </div>
         )}
       </Command>
     </div>

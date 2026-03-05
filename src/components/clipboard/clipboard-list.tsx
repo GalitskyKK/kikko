@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ClipboardEntry } from '@/stores/clipboard-store'
 import { ClipboardItem } from '@/components/clipboard/clipboard-item'
@@ -34,15 +34,20 @@ export function ClipboardList({
   const rowVirtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 64,
+    estimateSize: () => 58,
     overscan: 10,
+    measureElement: (element) => element.getBoundingClientRect().height,
+    scrollToFn: (offset, { adjustments = 0 }, instance) => {
+      const el = instance.scrollElement as HTMLElement | null
+      if (el && 'scrollTop' in el) el.scrollTop = offset + adjustments
+    },
   })
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!selectedId) return
     const selectedIndex = itemsRef.current.findIndex((entry) => entry.id === selectedId)
     if (selectedIndex < 0) return
-    rowVirtualizer.scrollToIndex(selectedIndex, { align: 'auto' })
+    rowVirtualizer.scrollToIndex(selectedIndex, { align: 'auto', behavior: 'auto' })
   }, [rowVirtualizer, scrollToSelectedSignal, selectedId])
 
   return (
@@ -51,7 +56,7 @@ export function ClipboardList({
       role="listbox"
       aria-label="Clipboard history"
       aria-activedescendant={activeDescendant}
-      className="h-full min-h-0 overflow-y-auto"
+      className="h-full min-h-0 overflow-y-auto scroll-auto"
     >
       <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
@@ -61,7 +66,9 @@ export function ClipboardList({
           return (
             <div
               key={entry.id}
-              className="absolute left-0 top-0 w-full"
+              data-index={virtualRow.index}
+              ref={rowVirtualizer.measureElement}
+              className="absolute top-0 left-0 w-full transition-none"
               style={{ transform: `translateY(${virtualRow.start}px)` }}
             >
               <ClipboardItem

@@ -133,6 +133,12 @@
     color: inherit;
     transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   }
+
+  /* В палетке при навигации стрелками transitions дают “плавнение/лесенку” */
+  .palette-panel [cmdk-item] {
+    transition: none !important;
+  }
+
   [cmdk-item]:not([data-selected="true"]):hover {
     background: hsl(var(--accent) / 0.86);
     border-color: hsl(var(--ring) / 0.46);

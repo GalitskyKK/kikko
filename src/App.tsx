@@ -108,6 +108,26 @@ function usePreloadSearchData() {
   }, [])
 }
 
+/** Синхронизирует настройку «запуск с системой» с нативным плагином при старте приложения и при смене значения. */
+function useApplyAutostartOnStartup() {
+  const launchOnStartup = useSettingsStore((state) => state.general.launchOnStartup)
+  useEffect(() => {
+    if (!isTauriRuntime()) return
+    void import('@tauri-apps/plugin-autostart').then(async (autostart) => {
+      try {
+        const enabled = await autostart.isEnabled()
+        if (launchOnStartup && !enabled) {
+          await autostart.enable()
+        } else if (!launchOnStartup && enabled) {
+          await autostart.disable()
+        }
+      } catch {
+        // capability denied or plugin unavailable
+      }
+    })
+  }, [launchOnStartup])
+}
+
 function useSettingsSyncOnWindowFocus() {
   useEffect(() => {
     if (!isTauriRuntime()) return
@@ -149,6 +169,7 @@ export function App() {
   useTray()
   useClipboardPolling()
   usePreloadSearchData()
+  useApplyAutostartOnStartup()
   useSettingsSyncOnWindowFocus()
 
   useEffect(() => {
