@@ -34,7 +34,7 @@ export function QuickNotesWidget() {
         value={quickNoteText}
         onChange={(event) => setQuickNoteText(event.target.value)}
         placeholder="Write notes, todos, or temporary snippets..."
-        className="h-full min-h-[130px] w-full resize-none rounded-xl border border-border/70 bg-muted/30 px-3 py-2 text-sm text-foreground outline-none ring-ring/60 placeholder:text-muted-foreground focus:ring-2"
+        className="h-full min-h-[130px] w-full resize-none rounded-xl border border-border/70 bg-muted/30 px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
       />
     </WidgetShell>
   )

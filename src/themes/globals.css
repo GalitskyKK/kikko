@@ -71,6 +71,13 @@
     border-color: hsl(var(--border));
   }
 
+  /* Убираем любые focus-ring эффекты (box-shadow/outline) по всему приложению */
+  *:focus,
+  *:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
   /* Окно на весь viewport — контент заполняет высоту окна Tauri */
   html {
     width: 100%;
@@ -273,8 +280,8 @@
   .liquid-glass-overlay {
     background: linear-gradient(
       180deg,
-      rgba(255, 255, 255, 0.74) 0%,
-      rgba(247, 250, 255, 0.82) 100%
+      rgba(255, 255, 255, 1) 0%,
+      rgba(247, 250, 255, 1) 100%
     );
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -282,8 +289,8 @@
   .dark .liquid-glass-overlay {
     background: linear-gradient(
       180deg,
-      rgba(0, 0, 0, 0.55) 0%,
-      rgba(0, 0, 0, 0.65) 100%
+      rgba(0, 0, 0, 1) 0%,
+      rgba(0, 0, 0, 1) 100%
     );
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);

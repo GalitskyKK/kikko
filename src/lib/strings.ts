@@ -18,7 +18,7 @@ export const STRINGS = {
     clipboardHistory: 'Clipboard History',
     clearAll: 'Clear all',
     actionPanel: 'Actions',
-    actionPanelHint: 'Ctrl+K Actions',
+    actionPanelHint: 'Actions',
     loading: 'Loading...',
     searching: 'Searching...',
     actionPaste: 'Paste / Copy',

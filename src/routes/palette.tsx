@@ -61,6 +61,7 @@ import { STRINGS } from '@/lib/strings'
 import { setLastClipboardContent } from '@/lib/clipboard-polling'
 import { isTauriRuntime } from '@/lib/tauri'
 import { openDashboardWindow, openSettingsWindow } from '@/lib/window-navigation'
+import { isMacPlatform } from '@/lib/platform'
 import { useClipboardStore, type ClipboardEntry } from '@/stores/clipboard-store'
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { useSearchStore, type SearchResult } from '@/stores/search-store'
@@ -153,6 +154,8 @@ export function PalettePage() {
     if (!isTauriRuntime()) return
     void getCurrentWindow().hide()
   }, [])
+
+  const actionsShortcutLabel = useMemo(() => (isMacPlatform() ? '⌘ K' : 'Ctrl K'), [])
 
   const closeFooterMenu = useCallback((options?: { focusButton?: boolean }) => {
     setIsFooterMenuOpen(false)
@@ -1446,7 +1449,8 @@ export function PalettePage() {
         hideWindow()
         return
       }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      // Layout-independent: works on RU/EN keyboard layouts
+      if ((event.ctrlKey || event.metaKey) && (event.code === 'KeyK' || event.key.toLowerCase() === 'k')) {
         event.preventDefault()
         toggleActionsView()
         return
@@ -1967,7 +1971,7 @@ export function PalettePage() {
                                   className={cn(
                                     'flex h-9 w-9 cursor-pointer items-center justify-center rounded text-xl transition-colors',
                                     isSelected
-                                      ? 'bg-accent ring-border ring-1'
+                                      ? 'bg-accent'
                                       : 'hover:bg-muted/60',
                                   )}
                                   onClick={() => {
@@ -2256,7 +2260,7 @@ export function PalettePage() {
                         action.onSelect()
                       }}
                       className={cn(
-                        'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70',
+                        'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-none',
                         isSelected
                           ? 'border-ring/45 bg-accent text-foreground shadow-sm'
                           : 'text-foreground/90 hover:border-ring/35 hover:bg-accent/70 border-transparent',
@@ -2289,7 +2293,7 @@ export function PalettePage() {
                   setSelectedFooterMenuIndex(0)
                 }}
                 className={cn(
-                  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground cursor-pointer transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-50',
+                  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground cursor-pointer transition-colors duration-150 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',
                   'hover:bg-[hsl(var(--accent))] hover:text-accent-foreground',
                   isFooterMenuOpen && 'bg-[hsl(var(--accent))] text-accent-foreground',
                 )}
@@ -2352,7 +2356,7 @@ export function PalettePage() {
                 >
                   {STRINGS.palette.actions}
                 </Button>
-                <Kbd>Ctrl K</Kbd>
+                <Kbd>{actionsShortcutLabel}</Kbd>
               </div>
             </div>
           </div>

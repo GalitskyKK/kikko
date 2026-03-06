@@ -1,6 +1,10 @@
 import {
   Check,
+  ClipboardList,
+  Cog,
+  FileText,
   Keyboard,
+  Layers,
   Link,
   Monitor,
   Moon,
@@ -9,6 +13,7 @@ import {
   Plug,
   Plus,
   Sun,
+  Tag,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -23,6 +28,34 @@ import { usePluginStore } from '@/stores/plugin-store'
 import { useQuicklinkStore } from '@/stores/quicklink-store'
 import { useSnippetStore } from '@/stores/snippet-store'
 import { useSettingsStore, type AccentPreset, type UiDensity } from '@/stores/settings-store'
+import { cn } from '@/utils/cn'
+
+type SettingsSectionId =
+  | 'general'
+  | 'appearance'
+  | 'clipboard'
+  | 'shortcuts'
+  | 'extensions'
+  | 'snippets'
+  | 'quicklinks'
+  | 'aliases'
+  | 'plugins'
+
+const SETTINGS_SECTIONS: Array<{
+  id: SettingsSectionId
+  label: string
+  icon: ComponentType<{ className?: string }>
+}> = [
+  { id: 'general', label: 'General', icon: Cog },
+  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'clipboard', label: 'Clipboard History', icon: ClipboardList },
+  { id: 'extensions', label: 'Extensions', icon: Layers },
+  { id: 'snippets', label: 'Snippets', icon: FileText },
+  { id: 'quicklinks', label: 'Quick Links', icon: Link },
+  { id: 'aliases', label: 'Aliases', icon: Tag },
+  { id: 'plugins', label: 'Plugins', icon: Plug },
+]
 
 /** Страница настроек */
 export function SettingsPage() {
@@ -69,6 +102,7 @@ export function SettingsPage() {
   const [quicklinkUrl, setQuicklinkUrl] = useState('')
   const [quicklinkTags, setQuicklinkTags] = useState('')
   const [quicklinkError, setQuicklinkError] = useState('')
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>('general')
   const snippetNameInputRef = useRef<HTMLInputElement>(null)
   const quicklinkNameInputRef = useRef<HTMLInputElement>(null)
 
@@ -254,36 +288,24 @@ export function SettingsPage() {
     const fromPalette = window.localStorage.getItem('kikko:settings:focus-section')
     window.localStorage.removeItem('kikko:settings:focus-section')
     if (fromPalette === 'snippets') {
+      setActiveSection('snippets')
       setSnippetEditorId(null)
       setSnippetName('')
       setSnippetKeyword('')
       setSnippetContent('')
       setSnippetCategory('general')
       setSnippetError('')
-      requestAnimationFrame(() => {
-        document.querySelector<HTMLElement>('[data-settings-section="snippets"]')?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'start',
-        })
-        snippetNameInputRef.current?.focus()
-      })
+      requestAnimationFrame(() => snippetNameInputRef.current?.focus())
       return
     }
     if (fromPalette === 'quicklinks') {
+      setActiveSection('quicklinks')
       setQuicklinkEditorId(null)
       setQuicklinkName('')
       setQuicklinkUrl('')
       setQuicklinkTags('')
       setQuicklinkError('')
-      requestAnimationFrame(() => {
-        document
-          .querySelector<HTMLElement>('[data-settings-section="quicklinks"]')
-          ?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start',
-          })
-        quicklinkNameInputRef.current?.focus()
-      })
+      requestAnimationFrame(() => quicklinkNameInputRef.current?.focus())
     }
   }, [])
 
@@ -318,40 +340,72 @@ export function SettingsPage() {
   }
 
   return (
-    <PageShell title="Settings" subtitle="Theme and behavior">
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto pb-2">
-        <Panel className="space-y-4 p-4">
-          <div>
-            <h2 className="text-foreground text-sm font-semibold">General</h2>
-            <p className="text-muted-foreground text-xs">Core behavior and launch options.</p>
-          </div>
-          <SettingsToggleRow
-            label="Launch on startup"
-            description="Open Kikko when system starts."
-            checked={general.launchOnStartup}
-            onChange={(value) => updateGeneral({ launchOnStartup: value })}
-          />
-          <SettingsToggleRow
-            label="Close on Escape"
-            description="Hide window immediately when pressing Escape."
-            checked={general.closeOnEscape}
-            onChange={(value) => updateGeneral({ closeOnEscape: value })}
-          />
-          <SettingsToggleRow
-            label="Show start suggestions"
-            description="When on: full panel with suggestions on open. When off: compact — only search bar until you type."
-            checked={general.showStartSuggestions}
-            onChange={(value) => updateGeneral({ showStartSuggestions: value })}
-          />
-        </Panel>
+    <PageShell title="Settings" subtitle="Preferences">
+      <div className="flex min-h-0 flex-1 -m-4">
+        <aside
+          className="border-border/70 flex w-52 shrink-0 flex-col border-r bg-muted/30 py-2"
+          aria-label="Settings categories"
+        >
+          <nav className="flex flex-col gap-0.5 px-2">
+            {SETTINGS_SECTIONS.map((section) => {
+              const Icon = section.icon
+              const isActive = activeSection === section.id
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => setActiveSection(section.id)}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors',
+                    isActive
+                      ? 'bg-[hsl(var(--accent))] text-accent-foreground'
+                      : 'text-foreground/90 hover:bg-[hsl(var(--accent)/0.7)]',
+                  )}
+                  aria-current={isActive ? 'true' : undefined}
+                >
+                  <Icon className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">{section.label}</span>
+                </button>
+              )
+            })}
+          </nav>
+        </aside>
+        <div className="min-w-0 flex-1 overflow-y-auto p-6">
+          {activeSection === 'general' && (
+            <Panel className="space-y-4 p-4">
+              <div>
+                <h2 className="text-foreground text-sm font-semibold">General</h2>
+                <p className="text-muted-foreground text-xs">Core behavior and launch options.</p>
+              </div>
+              <SettingsToggleRow
+                label="Launch on startup"
+                description="Open Kikko when system starts."
+                checked={general.launchOnStartup}
+                onChange={(value) => updateGeneral({ launchOnStartup: value })}
+              />
+              <SettingsToggleRow
+                label="Close on Escape"
+                description="Hide window immediately when pressing Escape."
+                checked={general.closeOnEscape}
+                onChange={(value) => updateGeneral({ closeOnEscape: value })}
+              />
+              <SettingsToggleRow
+                label="Show start suggestions"
+                description="When on: full panel with suggestions on open. When off: compact — only search bar until you type."
+                checked={general.showStartSuggestions}
+                onChange={(value) => updateGeneral({ showStartSuggestions: value })}
+              />
+            </Panel>
+          )}
 
-        <Panel className="space-y-4 p-4">
-          <div>
-            <h2 className="text-foreground text-sm font-semibold">Appearance</h2>
-            <p className="text-muted-foreground text-xs">Theme, density and visual behavior.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ThemeButton
+          {activeSection === 'appearance' && (
+            <Panel className="space-y-4 p-4">
+              <div>
+                <h2 className="text-foreground text-sm font-semibold">Appearance</h2>
+                <p className="text-muted-foreground text-xs">Theme, density and visual behavior.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <ThemeButton
               active={appearance.themeMode === 'system'}
               onClick={() => updateAppearance({ themeMode: 'system' })}
               icon={Monitor}
@@ -410,141 +464,146 @@ export function SettingsPage() {
             ]}
             onChange={(value) => updateAppearance({ accentPreset: value })}
           />
-        </Panel>
+            </Panel>
+          )}
 
-        <Panel className="space-y-4 p-4">
-          <div>
-            <h2 className="text-foreground text-sm font-semibold">Clipboard</h2>
-            <p className="text-muted-foreground text-xs">History limits and capture behavior.</p>
-          </div>
+          {activeSection === 'clipboard' && (
+            <Panel className="space-y-4 p-4">
+              <div>
+                <h2 className="text-foreground text-sm font-semibold">Clipboard</h2>
+                <p className="text-muted-foreground text-xs">History limits and capture behavior.</p>
+              </div>
+              <SettingsNumberRow
+                label="Retention days"
+                description="Automatically remove entries older than this."
+                value={clipboard.retentionDays}
+                min={1}
+                max={365}
+                onChange={(value) => updateClipboard({ retentionDays: value })}
+              />
+              <SettingsNumberRow
+                label="Max items"
+                description="Hard limit for clipboard history size."
+                value={clipboard.maxItems}
+                min={50}
+                max={5000}
+                onChange={(value) => updateClipboard({ maxItems: value })}
+              />
+              <SettingsToggleRow
+                label="Capture images"
+                description="Save image copies to clipboard history."
+                checked={clipboard.captureImages}
+                onChange={(value) => updateClipboard({ captureImages: value })}
+              />
 
-          <SettingsNumberRow
-            label="Retention days"
-            description="Automatically remove entries older than this."
-            value={clipboard.retentionDays}
-            min={1}
-            max={365}
-            onChange={(value) => updateClipboard({ retentionDays: value })}
-          />
+              <SettingsToggleRow
+                label="Capture files"
+                description="Save copied file lists in clipboard history."
+                checked={clipboard.captureFiles}
+                onChange={(value) => updateClipboard({ captureFiles: value })}
+              />
+            </Panel>
+          )}
 
-          <SettingsNumberRow
-            label="Max items"
-            description="Hard limit for clipboard history size."
-            value={clipboard.maxItems}
-            min={50}
-            max={5000}
-            onChange={(value) => updateClipboard({ maxItems: value })}
-          />
+          {activeSection === 'shortcuts' && (
+            <Panel className="space-y-4 p-4">
+              <div>
+                <h2 className="text-foreground flex items-center gap-2 text-sm font-semibold">
+                  <Keyboard className="text-muted-foreground h-4 w-4" aria-hidden />
+                  Shortcuts
+                </h2>
+                <p className="text-muted-foreground text-xs">
+                  Active shortcuts: Win+Shift+K (palette), Win+J (dashboard), Win+Shift+, (settings).
+                  Custom bindings below are saved for display; applying them is planned.
+                </p>
+              </div>
+              <SettingsShortcutRow
+                label="Open palette"
+                description="Primary launcher. Click Bind, then press the key combination."
+                value={hotkeys.openPalette}
+                onChange={(value) => updateHotkeys({ openPalette: value })}
+              />
+              <SettingsShortcutRow
+                label="Open dashboard"
+                description="Quick dashboard. Click Bind, then press the key combination."
+                value={hotkeys.openDashboard}
+                onChange={(value) => updateHotkeys({ openDashboard: value })}
+              />
+              <SettingsShortcutRow
+                label="Open settings"
+                description="Open settings. Click Bind, then press the key combination."
+                value={hotkeys.openSettings}
+                onChange={(value) => updateHotkeys({ openSettings: value })}
+              />
+              <p className="text-muted-foreground text-[11px]">
+                Bindings are saved; only the defaults above are active until runtime rebinding is wired.
+              </p>
+              <div className="border-border/50 bg-muted/20 mt-3 rounded-lg border border-dashed px-3 py-2">
+                <p className="text-muted-foreground text-xs">
+                  <strong className="text-foreground/90">Per-app shortcuts:</strong> assign a global
+                  hotkey to open a specific app or action (e.g. Super+1 for App) — planned; for now use
+                  Aliases and type the keyword in the palette.
+                </p>
+              </div>
+            </Panel>
+          )}
 
-          <SettingsToggleRow
-            label="Capture images"
-            description="Save image copies to clipboard history."
-            checked={clipboard.captureImages}
-            onChange={(value) => updateClipboard({ captureImages: value })}
-          />
+          {activeSection === 'extensions' && (
+            <Panel className="space-y-4 p-4">
+              <div>
+                <h2 className="text-foreground text-sm font-semibold">Extensions (local)</h2>
+                <p className="text-muted-foreground text-xs">Enable or disable built-in modules.</p>
+              </div>
+              <SettingsToggleRow
+                label="Clipboard"
+                description="Clipboard history and actions."
+                checked={extensions.clipboard}
+                onChange={(value) => updateExtensions({ clipboard: value })}
+              />
+              <SettingsToggleRow
+                label="Snippets"
+                description="Snippet search and insertion."
+                checked={extensions.snippets}
+                onChange={(value) => updateExtensions({ snippets: value })}
+              />
+              <SettingsToggleRow
+                label="Calculator"
+                description="Inline calculations in search."
+                checked={extensions.calculator}
+                onChange={(value) => updateExtensions({ calculator: value })}
+              />
+              <SettingsToggleRow
+                label="Dashboard"
+                description="Dashboard route and widgets."
+                checked={extensions.dashboard}
+                onChange={(value) => updateExtensions({ dashboard: value })}
+              />
+            </Panel>
+          )}
 
-          <SettingsToggleRow
-            label="Capture files"
-            description="Save copied file lists in clipboard history."
-            checked={clipboard.captureFiles}
-            onChange={(value) => updateClipboard({ captureFiles: value })}
-          />
-        </Panel>
-
-        <Panel className="space-y-4 p-4">
-          <div>
-            <h2 className="text-foreground flex items-center gap-2 text-sm font-semibold">
-              <Keyboard className="text-muted-foreground h-4 w-4" aria-hidden />
-              Shortcuts
-            </h2>
-            <p className="text-muted-foreground text-xs">
-              Active shortcuts: Win+Shift+K (palette), Win+J (dashboard), Win+Shift+, (settings).
-              Custom bindings below are saved for display; applying them is planned.
-            </p>
-          </div>
-          <SettingsShortcutRow
-            label="Open palette"
-            description="Primary launcher. Click Bind, then press the key combination."
-            value={hotkeys.openPalette}
-            onChange={(value) => updateHotkeys({ openPalette: value })}
-          />
-          <SettingsShortcutRow
-            label="Open dashboard"
-            description="Quick dashboard. Click Bind, then press the key combination."
-            value={hotkeys.openDashboard}
-            onChange={(value) => updateHotkeys({ openDashboard: value })}
-          />
-          <SettingsShortcutRow
-            label="Open settings"
-            description="Open settings. Click Bind, then press the key combination."
-            value={hotkeys.openSettings}
-            onChange={(value) => updateHotkeys({ openSettings: value })}
-          />
-          <p className="text-muted-foreground text-[11px]">
-            Bindings are saved; only the defaults above are active until runtime rebinding is wired.
-          </p>
-          <div className="border-border/50 bg-muted/20 mt-3 rounded-lg border border-dashed px-3 py-2">
-            <p className="text-muted-foreground text-xs">
-              <strong className="text-foreground/90">Per-app shortcuts:</strong> assign a global
-              hotkey to open a specific app or action (e.g. Super+1 for App) — planned; for now use
-              Aliases and type the keyword in the palette.
-            </p>
-          </div>
-        </Panel>
-
-        <Panel className="space-y-4 p-4">
-          <div>
-            <h2 className="text-foreground text-sm font-semibold">Extensions (local)</h2>
-            <p className="text-muted-foreground text-xs">Enable or disable built-in modules.</p>
-          </div>
-          <SettingsToggleRow
-            label="Clipboard"
-            description="Clipboard history and actions."
-            checked={extensions.clipboard}
-            onChange={(value) => updateExtensions({ clipboard: value })}
-          />
-          <SettingsToggleRow
-            label="Snippets"
-            description="Snippet search and insertion."
-            checked={extensions.snippets}
-            onChange={(value) => updateExtensions({ snippets: value })}
-          />
-          <SettingsToggleRow
-            label="Calculator"
-            description="Inline calculations in search."
-            checked={extensions.calculator}
-            onChange={(value) => updateExtensions({ calculator: value })}
-          />
-          <SettingsToggleRow
-            label="Dashboard"
-            description="Dashboard route and widgets."
-            checked={extensions.dashboard}
-            onChange={(value) => updateExtensions({ dashboard: value })}
-          />
-        </Panel>
-
-        <Panel className="space-y-4 p-4" data-settings-section="snippets">
-          <div>
-            <h2 className="text-foreground text-sm font-semibold">Snippets</h2>
-            <p className="text-muted-foreground text-xs">
-              Create, update and remove text snippets.
-            </p>
-          </div>
-          <div className="grid gap-2 md:grid-cols-2">
+          {activeSection === 'snippets' && (
+            <Panel className="space-y-4 p-4" data-settings-section="snippets">
+              <div>
+                <h2 className="text-foreground text-sm font-semibold">Snippets</h2>
+                <p className="text-muted-foreground text-xs">
+                  Create, update and remove text snippets.
+                </p>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
             <input
               ref={snippetNameInputRef}
               type="text"
               value={snippetName}
               onChange={(event) => setSnippetName(event.target.value)}
               placeholder="Snippet name"
-              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+                  className="border-border/70 bg-background text-foreground h-9 rounded-md border px-2 text-sm outline-none"
             />
             <input
               type="text"
               value={snippetKeyword}
               onChange={(event) => setSnippetKeyword(event.target.value)}
               placeholder="Keyword (e.g. !email)"
-              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+                  className="border-border/70 bg-background text-foreground h-9 rounded-md border px-2 text-sm outline-none"
             />
           </div>
           <input
@@ -552,13 +611,13 @@ export function SettingsPage() {
             value={snippetCategory}
             onChange={(event) => setSnippetCategory(event.target.value)}
             placeholder="Category"
-            className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+                className="border-border/70 bg-background text-foreground h-9 w-full rounded-md border px-2 text-sm outline-none"
           />
           <textarea
             value={snippetContent}
             onChange={(event) => setSnippetContent(event.target.value)}
             placeholder="Snippet content"
-            className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 min-h-24 w-full rounded-md border px-2 py-2 text-sm outline-none focus-visible:ring-2"
+                className="border-border/70 bg-background text-foreground min-h-24 w-full rounded-md border px-2 py-2 text-sm outline-none"
           />
           {snippetError && <p className="text-destructive text-xs">{snippetError}</p>}
           <div className="flex items-center gap-2">
@@ -613,35 +672,37 @@ export function SettingsPage() {
                 <p className="text-muted-foreground mt-2 line-clamp-2 text-xs">{snippet.content}</p>
               </div>
             ))}
-          </div>
-        </Panel>
+              </div>
+            </Panel>
+          )}
 
-        <Panel className="space-y-4 p-4" data-settings-section="quicklinks">
-          <div>
-            <h2 className="text-foreground flex items-center gap-2 text-sm font-semibold">
-              <Link className="text-muted-foreground h-4 w-4" aria-hidden />
-              Quick Links
-            </h2>
-            <p className="text-muted-foreground text-xs">
-              Save links and open them from the palette. Use placeholders like {'{argument}'} in URL
-              for future support.
-            </p>
-          </div>
-          <div className="grid gap-2 md:grid-cols-2">
-            <input
-              ref={quicklinkNameInputRef}
+          {activeSection === 'quicklinks' && (
+            <Panel className="space-y-4 p-4" data-settings-section="quicklinks">
+              <div>
+                <h2 className="text-foreground flex items-center gap-2 text-sm font-semibold">
+                  <Link className="text-muted-foreground h-4 w-4" aria-hidden />
+                  Quick Links
+                </h2>
+                <p className="text-muted-foreground text-xs">
+                  Save links and open them from the palette. Use placeholders like {'{argument}'} in URL
+                  for future support.
+                </p>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <input
+                  ref={quicklinkNameInputRef}
               type="text"
               value={quicklinkName}
               onChange={(e) => setQuicklinkName(e.target.value)}
               placeholder="Quicklink name"
-              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+                  className="border-border/70 bg-background text-foreground h-9 rounded-md border px-2 text-sm outline-none"
             />
             <input
               type="text"
               value={quicklinkUrl}
               onChange={(e) => setQuicklinkUrl(e.target.value)}
               placeholder="https://…"
-              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+                  className="border-border/70 bg-background text-foreground h-9 rounded-md border px-2 text-sm outline-none"
             />
           </div>
           <input
@@ -649,7 +710,7 @@ export function SettingsPage() {
             value={quicklinkTags}
             onChange={(e) => setQuicklinkTags(e.target.value)}
             placeholder="Tags (comma-separated)"
-            className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+                className="border-border/70 bg-background text-foreground h-9 w-full rounded-md border px-2 text-sm outline-none"
           />
           {quicklinkError && <p className="text-destructive text-xs">{quicklinkError}</p>}
           <div className="flex items-center gap-2">
@@ -708,21 +769,23 @@ export function SettingsPage() {
                 )}
               </div>
             ))}
-          </div>
-        </Panel>
+              </div>
+            </Panel>
+          )}
 
-        <Panel className="space-y-4 p-4">
-          <div>
-            <h2 className="text-foreground text-sm font-semibold">Aliases</h2>
-            <p className="text-muted-foreground text-xs">
-              Prioritize commands/apps/snippets by custom aliases.
-            </p>
-          </div>
+          {activeSection === 'aliases' && (
+            <Panel className="space-y-4 p-4">
+              <div>
+                <h2 className="text-foreground text-sm font-semibold">Aliases</h2>
+                <p className="text-muted-foreground text-xs">
+                  Prioritize commands/apps/snippets by custom aliases.
+                </p>
+              </div>
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_auto]">
             <select
               value={aliasTargetId}
               onChange={(event) => setAliasTargetId(event.target.value)}
-              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+              className="border-border/70 bg-background text-foreground h-9 rounded-md border px-2 text-sm outline-none"
             >
               <option value="">Select target</option>
               {aliasTargets.map((target) => (
@@ -736,7 +799,7 @@ export function SettingsPage() {
               value={aliasValue}
               onChange={(event) => setAliasValue(event.target.value)}
               placeholder="alias"
-              className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+              className="border-border/70 bg-background text-foreground h-9 rounded-md border px-2 text-sm outline-none"
             />
             <Button size="sm" variant="muted" onClick={handleAliasSave}>
               Save alias
@@ -768,15 +831,17 @@ export function SettingsPage() {
                 </Button>
               </div>
             ))}
-          </div>
-        </Panel>
+              </div>
+            </Panel>
+          )}
 
-        <Panel className="space-y-4 p-4">
-          <div>
-            <h2 className="text-foreground flex items-center gap-2 text-sm font-semibold">
-              <Plug className="text-muted-foreground h-4 w-4" aria-hidden />
-              Plugins Runtime
-            </h2>
+          {activeSection === 'plugins' && (
+            <Panel className="space-y-4 p-4">
+              <div>
+                <h2 className="text-foreground flex items-center gap-2 text-sm font-semibold">
+                  <Plug className="text-muted-foreground h-4 w-4" aria-hidden />
+                  Plugins Runtime
+                </h2>
             <p className="text-muted-foreground text-xs">
               Built-in plugin state + scanned manifests from ~/.kikko/plugins.
             </p>
@@ -828,7 +893,9 @@ export function SettingsPage() {
               ))}
             </div>
           )}
-        </Panel>
+            </Panel>
+          )}
+        </div>
       </div>
     </PageShell>
   )
@@ -850,7 +917,7 @@ function ThemeButton({
       onClick={onClick}
       variant={active ? 'primary' : 'ghost'}
       size="sm"
-      className={`gap-2 border transition-all ${active ? 'border-ring/70 bg-accent text-foreground shadow-ring/35 ring-ring/60 shadow-sm ring-1' : 'border-border/80 bg-background/60 text-foreground/90 hover:border-ring/70 hover:bg-accent'}`}
+      className={`gap-2 border transition-all ${active ? 'border-ring/70 bg-accent text-foreground shadow-sm' : 'border-border/80 bg-background/60 text-foreground/90 hover:border-ring/70 hover:bg-accent'}`}
       aria-pressed={active}
     >
       {active && <Check className="text-ring h-4 w-4" aria-hidden />}
@@ -889,7 +956,7 @@ function SettingsToggleRow({
           aria-checked={checked}
           onClick={() => onChange(!checked)}
           title={`${label}: ${checked ? 'On' : 'Off'}`}
-          className={`focus-visible:ring-ring/80 relative inline-flex h-7 w-14 items-center rounded-full border p-0.5 transition-all focus-visible:ring-2 focus-visible:outline-none ${
+          className={`relative inline-flex h-7 w-14 items-center rounded-full border p-0.5 transition-all focus-visible:outline-none ${
             checked
               ? 'cursor-pointer border-emerald-300/80 bg-emerald-500 shadow-[0_0_0_1px_rgba(16,185,129,0.35)]'
               : 'border-border/90 hover:border-ring/55 cursor-pointer bg-zinc-500/75 hover:bg-zinc-500/90'
@@ -928,7 +995,7 @@ function SettingsChoiceRow<T extends string>({
             aria-pressed={value === option.id}
             className={
               value === option.id
-                ? 'border-ring/70 bg-accent text-foreground shadow-ring/35 ring-ring/60 border shadow-sm ring-1'
+                ? 'border-ring/70 bg-accent text-foreground border shadow-sm'
                 : 'border-border/80 bg-background/60 text-foreground/90 hover:border-ring/70 hover:bg-accent border'
             }
           >
@@ -972,7 +1039,7 @@ function SettingsNumberRow({
           if (Number.isNaN(parsed)) return
           onChange(Math.min(Math.max(parsed, min), max))
         }}
-        className="border-border/70 bg-background text-foreground focus-visible:ring-ring/70 h-9 w-24 rounded-md border px-2 text-sm outline-none focus-visible:ring-2"
+        className="border-border/70 bg-background text-foreground h-9 w-24 rounded-md border px-2 text-sm outline-none"
       />
     </div>
   )
