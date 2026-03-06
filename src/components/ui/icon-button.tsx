@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from 'react'
+import { forwardRef, type ButtonHTMLAttributes } from 'react'
 import { cn } from '@/utils/cn'
 
 type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -11,9 +11,13 @@ const sizeClass: Record<NonNullable<IconButtonProps['size']>, string> = {
   lg: 'h-10 w-10',
 }
 
-export function IconButton({ className, size = 'md', ...props }: IconButtonProps) {
+export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
+  { className, size = 'md', ...props },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type="button"
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-50',
@@ -23,4 +27,4 @@ export function IconButton({ className, size = 'md', ...props }: IconButtonProps
       {...props}
     />
   )
-}
+})

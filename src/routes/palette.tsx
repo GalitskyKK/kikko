@@ -11,6 +11,7 @@ import {
   Cog,
   FileText,
   LayoutDashboard,
+  MoreHorizontal,
   Plus,
   Search,
   SlidersHorizontal,
@@ -89,6 +90,8 @@ type PaletteAction = {
   onSelect: () => void
 }
 
+const KIKKO_GITHUB_URL = 'https://github.com/GalitskyKK/kikko'
+
 export function PalettePage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -104,6 +107,11 @@ export function PalettePage() {
   const [selectedCommandValue, setSelectedCommandValue] = useState('')
   const [selectedActionIndex, setSelectedActionIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [isFooterMenuOpen, setIsFooterMenuOpen] = useState(false)
+  const [selectedFooterMenuIndex, setSelectedFooterMenuIndex] = useState(0)
+  const footerMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const footerMenuPanelRef = useRef<HTMLDivElement>(null)
+  const footerMenuItemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const searchRequestIdRef = useRef(0)
   const searchablesCacheRef = useRef<SearchableWithAction[] | null>(null)
   const geometryRequestIdRef = useRef(0)
@@ -145,6 +153,73 @@ export function PalettePage() {
     if (!isTauriRuntime()) return
     void getCurrentWindow().hide()
   }, [])
+
+  const closeFooterMenu = useCallback((options?: { focusButton?: boolean }) => {
+    setIsFooterMenuOpen(false)
+    setSelectedFooterMenuIndex(0)
+    if (options?.focusButton) {
+      requestAnimationFrame(() => footerMenuButtonRef.current?.focus())
+    }
+  }, [])
+
+  const footerMenuActions = useMemo<PaletteAction[]>(
+    () => [
+      {
+        id: 'footer-dashboard',
+        label: STRINGS.palette.dashboard,
+        icon: LayoutDashboard,
+        onSelect: () => {
+          void openDashboardWindow()
+          hideWindow()
+        },
+      },
+      {
+        id: 'footer-settings',
+        label: STRINGS.palette.settings,
+        icon: Cog,
+        onSelect: () => {
+          void openSettingsWindow()
+          hideWindow()
+        },
+      },
+      {
+        id: 'footer-github',
+        label: 'GitHub',
+        icon: Link,
+        onSelect: () => {
+          if (isTauriRuntime()) {
+            void import('@tauri-apps/plugin-shell').then(({ open }) => open(KIKKO_GITHUB_URL))
+          } else if (typeof window !== 'undefined') {
+            window.open(KIKKO_GITHUB_URL, '_blank', 'noopener,noreferrer')
+          }
+          hideWindow()
+        },
+      },
+    ],
+    [hideWindow],
+  )
+
+  useEffect(() => {
+    if (!isFooterMenuOpen) return
+    requestAnimationFrame(() => {
+      footerMenuItemRefs.current[0]?.focus()
+    })
+  }, [isFooterMenuOpen])
+
+  useEffect(() => {
+    if (!isFooterMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (footerMenuPanelRef.current?.contains(target)) return
+      if (footerMenuButtonRef.current?.contains(target)) return
+      closeFooterMenu()
+    }
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true)
+    }
+  }, [closeFooterMenu, isFooterMenuOpen])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -334,13 +409,7 @@ export function PalettePage() {
           })
         }
         if (enabledExtensions.snippets) {
-          if (
-            matchesQuick(queryLower, 'Search Snippets', [
-              'snippets',
-              'snippet',
-              'search',
-            ])
-          ) {
+          if (matchesQuick(queryLower, 'Search Snippets', ['snippets', 'snippet', 'search'])) {
             quickActions.push({
               id: 'quick-snippets-search',
               type: 'snippet',
@@ -465,84 +534,86 @@ export function PalettePage() {
         setResults(fastResults)
         setLoading(false)
 
-        void getSearchables(value, searchOptions).then((searchables) => {
-          if (requestId !== searchRequestIdRef.current) return
-          searchablesCacheRef.current = searchables
-          if (value.trim() === '') {
-            setResults(
-              composeSearchResultsBySection(
-                searchEngine.search('', searchables, { cacheKey: 'initial' }),
-                '',
-                SEARCH_RESULTS_LIMIT,
-              ),
-            )
-            setLoading(false)
-            return
-          }
-          let listBg = searchEngine.search(value, searchables, { cacheKey: 'full' })
-          const quickActionsBg = buildQuickActions()
-          if (looksLikeMath(value)) {
-            const calc = calculate(value)
-            if (calc.success) {
-              listBg = [
-                {
-                  id: 'calc-result',
-                  type: 'calculator' as const,
-                  section: 'calculator' as const,
-                  title: `= ${calc.value}`,
-                  subtitle: calc.expression,
-                  score: 1,
-                  action: () => {
-                    if (!isTauriRuntime()) return
-                    setLastClipboardContent(calc.value)
-                    void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
-                      writeText(calc.value),
-                    )
-                    hideWindow()
-                  },
-                },
-                ...listBg,
-              ]
-            }
-          }
-          setResults(
-            composeSearchResultsBySection(
-              [...quickActionsBg, ...listBg],
-              value,
-              SEARCH_RESULTS_LIMIT,
-            ),
-          )
-          if (value.trim().length < 2) {
-            setLoading(false)
-            return
-          }
-          void getFileSearchables(value, { hideWindow })
-            .then((fileSearchables) => {
-              if (requestId !== searchRequestIdRef.current) return
-              if (fileSearchables.length === 0) {
-                setLoading(false)
-                return
-              }
-              const combined = [...searchables, ...fileSearchables]
-              listBg = searchEngine.search(value, combined, { cacheKey: 'full' })
+        void getSearchables(value, searchOptions)
+          .then((searchables) => {
+            if (requestId !== searchRequestIdRef.current) return
+            searchablesCacheRef.current = searchables
+            if (value.trim() === '') {
               setResults(
                 composeSearchResultsBySection(
-                  [...quickActionsBg, ...listBg],
-                  value,
+                  searchEngine.search('', searchables, { cacheKey: 'initial' }),
+                  '',
                   SEARCH_RESULTS_LIMIT,
                 ),
               )
               setLoading(false)
-            })
-            .catch(() => {
-              if (requestId !== searchRequestIdRef.current) return
+              return
+            }
+            let listBg = searchEngine.search(value, searchables, { cacheKey: 'full' })
+            const quickActionsBg = buildQuickActions()
+            if (looksLikeMath(value)) {
+              const calc = calculate(value)
+              if (calc.success) {
+                listBg = [
+                  {
+                    id: 'calc-result',
+                    type: 'calculator' as const,
+                    section: 'calculator' as const,
+                    title: `= ${calc.value}`,
+                    subtitle: calc.expression,
+                    score: 1,
+                    action: () => {
+                      if (!isTauriRuntime()) return
+                      setLastClipboardContent(calc.value)
+                      void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+                        writeText(calc.value),
+                      )
+                      hideWindow()
+                    },
+                  },
+                  ...listBg,
+                ]
+              }
+            }
+            setResults(
+              composeSearchResultsBySection(
+                [...quickActionsBg, ...listBg],
+                value,
+                SEARCH_RESULTS_LIMIT,
+              ),
+            )
+            if (value.trim().length < 2) {
               setLoading(false)
-            })
-        }).catch(() => {
-          if (requestId !== searchRequestIdRef.current) return
-          setResults([])
-          setLoading(false)
-        })
+              return
+            }
+            void getFileSearchables(value, { hideWindow })
+              .then((fileSearchables) => {
+                if (requestId !== searchRequestIdRef.current) return
+                if (fileSearchables.length === 0) {
+                  setLoading(false)
+                  return
+                }
+                const combined = [...searchables, ...fileSearchables]
+                listBg = searchEngine.search(value, combined, { cacheKey: 'full' })
+                setResults(
+                  composeSearchResultsBySection(
+                    [...quickActionsBg, ...listBg],
+                    value,
+                    SEARCH_RESULTS_LIMIT,
+                  ),
+                )
+                setLoading(false)
+              })
+              .catch(() => {
+                if (requestId !== searchRequestIdRef.current) return
+                setLoading(false)
+              })
+          })
+          .catch(() => {
+            if (requestId !== searchRequestIdRef.current) return
+            setResults([])
+            setLoading(false)
+          })
         return
       }
 
@@ -635,8 +706,6 @@ export function PalettePage() {
       enabledExtensions.snippets,
       hideWindow,
       navigate,
-      openDashboardWindow,
-      openSettingsWindow,
       setLoading,
       setResults,
     ],
@@ -710,7 +779,7 @@ export function PalettePage() {
       applyPaletteGeometry()
       void useSnippetStore.getState().loadFromBackend()
       void useQuicklinkStore.getState().loadFromBackend()
-    if (mode === 'search') {
+      if (mode === 'search') {
         runSearch(query)
       }
     })
@@ -755,19 +824,13 @@ export function PalettePage() {
     )
   }, [isSnippetsMode, query, snippets])
 
-  const emojiListWithFrequent = useMemo(
-    () => getEmojiWithFrequentFirst(EMOJI_LIST),
-    [],
-  )
+  const emojiListWithFrequent = useMemo(() => getEmojiWithFrequentFirst(EMOJI_LIST), [])
   const emojiFiltered = useMemo(() => {
     if (!isEmojiMode) return []
     return filterEmojiList(emojiListWithFrequent, query)
   }, [isEmojiMode, query, emojiListWithFrequent])
 
-  const emojiGridSections = useMemo(
-    () => getEmojiGridSections(emojiFiltered),
-    [emojiFiltered],
-  )
+  const emojiGridSections = useMemo(() => getEmojiGridSections(emojiFiltered), [emojiFiltered])
   const emojiFlatList = useMemo(
     () => emojiGridSections.flatMap((s) => s.entries),
     [emojiGridSections],
@@ -823,9 +886,7 @@ export function PalettePage() {
       setSelectedEmojiIndex(0)
       return
     }
-    setSelectedEmojiIndex((current) =>
-      current >= emojiFlatList.length ? 0 : current,
-    )
+    setSelectedEmojiIndex((current) => (current >= emojiFlatList.length ? 0 : current))
   }, [isEmojiMode, emojiFlatList.length])
 
   useEffect(() => {
@@ -1293,19 +1354,6 @@ export function PalettePage() {
     })
   }, [activeActions.length])
 
-  const commandExplainText = useMemo(() => {
-    if (!selectedSearchResult) return ''
-    const queryLower = query.trim().toLowerCase()
-    if (!queryLower) return 'Top result by base relevance and type priority'
-    if (selectedSearchResult.alias?.toLowerCase() === queryLower) {
-      return `Matched alias "${selectedSearchResult.alias}"`
-    }
-    if (selectedSearchResult.title.toLowerCase().startsWith(queryLower)) {
-      return 'Title prefix match'
-    }
-    return 'Matched by title/keywords relevance'
-  }, [query, selectedSearchResult])
-
   useEffect(() => {
     if (mode !== 'search') {
       setSelectedCommandValue('')
@@ -1341,6 +1389,41 @@ export function PalettePage() {
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (isFooterMenuOpen) {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          closeFooterMenu({ focusButton: true })
+          return
+        }
+        if (event.key === 'ArrowDown') {
+          event.preventDefault()
+          event.stopPropagation()
+          setSelectedFooterMenuIndex((current) =>
+            current >= footerMenuActions.length - 1 ? 0 : current + 1,
+          )
+          return
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault()
+          event.stopPropagation()
+          setSelectedFooterMenuIndex((current) =>
+            current <= 0 ? footerMenuActions.length - 1 : current - 1,
+          )
+          return
+        }
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.stopPropagation()
+          const action = footerMenuActions[selectedFooterMenuIndex]
+          if (action) {
+            closeFooterMenu({ focusButton: true })
+            action.onSelect()
+          }
+          return
+        }
+      }
+
       if (event.key === 'Escape') {
         event.preventDefault()
         if (pendingDangerousResult) {
@@ -1461,9 +1544,7 @@ export function PalettePage() {
         return
       }
       if (isQuicklinksMode && quicklinksFiltered.length > 0) {
-        const currentIndex = quicklinksFiltered.findIndex(
-          (q) => q.id === selectedQuicklinkId,
-        )
+        const currentIndex = quicklinksFiltered.findIndex((q) => q.id === selectedQuicklinkId)
         if (event.key === 'ArrowDown') {
           event.preventDefault()
           const nextIndex = currentIndex >= quicklinksFiltered.length - 1 ? 0 : currentIndex + 1
@@ -1493,24 +1574,26 @@ export function PalettePage() {
     },
     [
       activeActions,
-      clipboardFiltered,
       closeOnEscape,
-      copyAndClose,
       emojiFlatList,
       hideWindow,
       isActionsView,
       isClipboardMode,
       isEmojiMode,
       isSnippetsMode,
+      isQuicklinksMode,
       markSnippetUsed,
       mode,
       pendingDangerousResult,
       query,
       quicklinksFiltered,
       runSearch,
+      closeFooterMenu,
+      footerMenuActions,
+      isFooterMenuOpen,
       selectedActionIndex,
-      selectedClipboardId,
       selectedEmojiIndex,
+      selectedFooterMenuIndex,
       selectedQuicklinkId,
       selectedSnippetId,
       snippetsFiltered,
@@ -1549,15 +1632,19 @@ export function PalettePage() {
             value={query}
             onValueChange={handleValueChange}
             onKeyDownCapture={(event) => {
-              if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return
+              if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter')
+                return
               if (isActionsView) return
 
               if (isClipboardMode && clipboardFiltered.length > 0) {
                 event.preventDefault()
                 event.stopPropagation()
-                const currentIndex = clipboardFiltered.findIndex((entry) => entry.id === selectedClipboardId)
+                const currentIndex = clipboardFiltered.findIndex(
+                  (entry) => entry.id === selectedClipboardId,
+                )
                 if (event.key === 'ArrowDown') {
-                  const nextIndex = currentIndex >= clipboardFiltered.length - 1 ? 0 : currentIndex + 1
+                  const nextIndex =
+                    currentIndex >= clipboardFiltered.length - 1 ? 0 : currentIndex + 1
                   const nextId = clipboardFiltered[nextIndex]?.id
                   if (nextId) {
                     setSelectedClipboardId(nextId)
@@ -1566,7 +1653,8 @@ export function PalettePage() {
                   return
                 }
                 if (event.key === 'ArrowUp') {
-                  const nextIndex = currentIndex <= 0 ? clipboardFiltered.length - 1 : currentIndex - 1
+                  const nextIndex =
+                    currentIndex <= 0 ? clipboardFiltered.length - 1 : currentIndex - 1
                   const nextId = clipboardFiltered[nextIndex]?.id
                   if (nextId) {
                     setSelectedClipboardId(nextId)
@@ -1575,7 +1663,9 @@ export function PalettePage() {
                   return
                 }
                 if (event.key === 'Enter' && selectedClipboardId) {
-                  const selectedEntry = clipboardFiltered.find((entry) => entry.id === selectedClipboardId)
+                  const selectedEntry = clipboardFiltered.find(
+                    (entry) => entry.id === selectedClipboardId,
+                  )
                   if (selectedEntry) copyAndClose(selectedEntry)
                 }
                 return
@@ -1584,9 +1674,12 @@ export function PalettePage() {
               if (isQuicklinksMode && quicklinksFiltered.length > 0) {
                 event.preventDefault()
                 event.stopPropagation()
-                const currentIndex = quicklinksFiltered.findIndex((q) => q.id === selectedQuicklinkId)
+                const currentIndex = quicklinksFiltered.findIndex(
+                  (q) => q.id === selectedQuicklinkId,
+                )
                 if (event.key === 'ArrowDown') {
-                  const nextIndex = currentIndex >= quicklinksFiltered.length - 1 ? 0 : currentIndex + 1
+                  const nextIndex =
+                    currentIndex >= quicklinksFiltered.length - 1 ? 0 : currentIndex + 1
                   const nextId = quicklinksFiltered[nextIndex]?.id
                   if (nextId) {
                     setSelectedQuicklinkId(nextId)
@@ -1595,7 +1688,8 @@ export function PalettePage() {
                   return
                 }
                 if (event.key === 'ArrowUp') {
-                  const nextIndex = currentIndex <= 0 ? quicklinksFiltered.length - 1 : currentIndex - 1
+                  const nextIndex =
+                    currentIndex <= 0 ? quicklinksFiltered.length - 1 : currentIndex - 1
                   const nextId = quicklinksFiltered[nextIndex]?.id
                   if (nextId) {
                     setSelectedQuicklinkId(nextId)
@@ -1618,7 +1712,8 @@ export function PalettePage() {
                 event.stopPropagation()
                 const currentIndex = snippetsFiltered.findIndex((s) => s.id === selectedSnippetId)
                 if (event.key === 'ArrowDown') {
-                  const nextIndex = currentIndex >= snippetsFiltered.length - 1 ? 0 : currentIndex + 1
+                  const nextIndex =
+                    currentIndex >= snippetsFiltered.length - 1 ? 0 : currentIndex + 1
                   const nextId = snippetsFiltered[nextIndex]?.id
                   if (nextId) {
                     setSelectedSnippetId(nextId)
@@ -1627,7 +1722,8 @@ export function PalettePage() {
                   return
                 }
                 if (event.key === 'ArrowUp') {
-                  const nextIndex = currentIndex <= 0 ? snippetsFiltered.length - 1 : currentIndex - 1
+                  const nextIndex =
+                    currentIndex <= 0 ? snippetsFiltered.length - 1 : currentIndex - 1
                   const nextId = snippetsFiltered[nextIndex]?.id
                   if (nextId) {
                     setSelectedSnippetId(nextId)
@@ -1781,65 +1877,69 @@ export function PalettePage() {
             )}
 
             {isSnippetsMode && (
-            <>
-              {snippetsFiltered.length === 0 && (
-                <div className="text-muted-foreground flex flex-col items-center gap-3 py-8 text-center text-sm">
-                  <p>No snippets found.</p>
-                  <Button
-                    size="sm"
-                    variant="muted"
-                    className="gap-2"
-                    onClick={() => {
-                      if (typeof window !== 'undefined') {
-                        window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
-                      }
-                      void openSettingsWindow()
-                      hideWindow()
-                    }}
-                  >
-                    <Plus className="h-3.5 w-3.5" aria-hidden />
-                    Create snippet
-                  </Button>
-                </div>
-              )}
-              {snippetsFiltered.length > 0 && (
-                <Command.Group heading={STRINGS.palette.snippets}>
-                  {snippetsFiltered.map((snippet) => (
-                    <Command.Item
-                      key={snippet.id}
-                      value={`snippet-entry:${snippet.id}`}
-                      data-keyboard-selected={selectedSnippetId === snippet.id ? 'true' : undefined}
-                      onSelect={() => {
-                        if (!isTauriRuntime()) return
-                        void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
-                          writeText(snippet.content),
-                        )
-                        void markSnippetUsed(snippet.id)
+              <>
+                {snippetsFiltered.length === 0 && (
+                  <div className="text-muted-foreground flex flex-col items-center gap-3 py-8 text-center text-sm">
+                    <p>No snippets found.</p>
+                    <Button
+                      size="sm"
+                      variant="muted"
+                      className="gap-2"
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
+                        }
+                        void openSettingsWindow()
                         hideWindow()
                       }}
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden />
+                      Create snippet
+                    </Button>
+                  </div>
+                )}
+                {snippetsFiltered.length > 0 && (
+                  <Command.Group heading={STRINGS.palette.snippets}>
+                    {snippetsFiltered.map((snippet) => (
+                      <Command.Item
+                        key={snippet.id}
+                        value={`snippet-entry:${snippet.id}`}
+                        data-keyboard-selected={
+                          selectedSnippetId === snippet.id ? 'true' : undefined
+                        }
+                        onSelect={() => {
+                          if (!isTauriRuntime()) return
+                          void import('@tauri-apps/plugin-clipboard-manager').then(
+                            ({ writeText }) => writeText(snippet.content),
+                          )
+                          void markSnippetUsed(snippet.id)
+                          hideWindow()
+                        }}
                         className={cn(
                           'text-foreground flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm',
                           selectedSnippetId === snippet.id && 'keyboard-selected',
                         )}
-                    >
-                      <FileText className="h-4 w-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
-                      <span className="min-w-0 flex-1 truncate">{snippet.name}</span>
-                      <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
-                        {snippet.keyword}
-                      </span>
-                    </Command.Item>
-                  ))}
-                </Command.Group>
-              )}
-            </>
-          )}
+                      >
+                        <FileText className="h-4 w-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
+                        <span className="min-w-0 flex-1 truncate">{snippet.name}</span>
+                        <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
+                          {snippet.keyword}
+                        </span>
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                )}
+              </>
+            )}
 
             {isEmojiMode && !isActionsView && (
               <>
                 {emojiFlatList.length === 0 && (
                   <div className="text-muted-foreground flex flex-col items-center gap-3 py-8 text-center text-sm">
                     <p>No emojis match your search.</p>
-                    <p className="text-xs">Try &quot;smile&quot;, &quot;fire&quot;, &quot;heart&quot;</p>
+                    <p className="text-xs">
+                      Try &quot;smile&quot;, &quot;fire&quot;, &quot;heart&quot;
+                    </p>
                   </div>
                 )}
                 {emojiFlatList.length > 0 && (
@@ -1867,7 +1967,7 @@ export function PalettePage() {
                                   className={cn(
                                     'flex h-9 w-9 cursor-pointer items-center justify-center rounded text-xl transition-colors',
                                     isSelected
-                                      ? 'bg-accent ring-1 ring-border'
+                                      ? 'bg-accent ring-border ring-1'
                                       : 'hover:bg-muted/60',
                                   )}
                                   onClick={() => {
@@ -1926,9 +2026,7 @@ export function PalettePage() {
                         data-quicklink-selected={selectedQuicklinkId === q.id ? true : undefined}
                         onSelect={() => {
                           if (!isTauriRuntime()) return
-                          void import('@tauri-apps/plugin-shell').then(({ open }) =>
-                            open(q.url),
-                          )
+                          void import('@tauri-apps/plugin-shell').then(({ open }) => open(q.url))
                           hideWindow()
                         }}
                         className={cn(
@@ -1948,143 +2046,146 @@ export function PalettePage() {
               </>
             )}
 
-          {isRootMode && isLoading && (
-            <div className="text-muted-foreground py-4 text-center text-sm">
-              {STRINGS.palette.searching}
-            </div>
-          )}
+            {isRootMode && isLoading && (
+              <div className="text-muted-foreground py-4 text-center text-sm">
+                {STRINGS.palette.searching}
+              </div>
+            )}
 
-          {isRootMode && shouldShowStartSuggestions && (
-            <Command.Group heading={STRINGS.palette.startSuggestions}>
-              {startSuggestions.map((item) => (
-                <Command.Item
-                  key={item.id}
-                  value={`suggestion:${item.id}`}
-                  onSelect={item.action}
-                  className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
-                >
-                  <item.icon className={cn('h-4 w-4 shrink-0', item.iconClassName)} aria-hidden />
-                  <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                  <span className="text-muted-foreground max-w-[160px] shrink-0 truncate text-xs">
-                    {item.subtitle}
-                  </span>
-                </Command.Item>
-              ))}
-            </Command.Group>
-          )}
-
-          {isRootMode && !isLoading && (
-            <>
-              {results.length === 0 && !shouldShowStartSuggestions && !calcResult && (
-                <Command.Empty className="text-muted-foreground py-8 text-center text-sm">
-                  {STRINGS.palette.empty}
-                </Command.Empty>
-              )}
-              {calcResult && (
-                <Command.Group key="calculator-block" heading={STRINGS.palette.calculator}>
-                  <div className="bg-muted/40 flex items-stretch gap-4 rounded-lg px-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-muted-foreground text-xs font-medium">
-                        {STRINGS.palette.calculatorExpression}
-                      </p>
-                      <p className="text-foreground text-lg font-semibold tracking-tight">
-                        {calcResult.expression.replace(/\//g, '÷')}
-                      </p>
-                    </div>
-                    <span className="text-muted-foreground shrink-0 self-center" aria-hidden>
-                      →
-                    </span>
-                    <div className="min-w-0 flex-1 text-right">
-                      <p className="text-muted-foreground text-xs font-medium">
-                        {STRINGS.palette.calculatorResult}
-                      </p>
-                      <p className="text-foreground text-lg font-semibold tracking-tight">
-                        {calcResult.value}
-                      </p>
-                    </div>
-                  </div>
+            {isRootMode && shouldShowStartSuggestions && (
+              <Command.Group heading={STRINGS.palette.startSuggestions}>
+                {startSuggestions.map((item) => (
                   <Command.Item
-                    value="calc-copy"
-                    onSelect={() => {
-                      if (calcResult && isTauriRuntime()) {
-                        setLastClipboardContent(calcResult.value)
-                        void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
-                          writeText(calcResult.value),
-                        )
-                        hideWindow()
-                      }
-                    }}
+                    key={item.id}
+                    value={`suggestion:${item.id}`}
+                    onSelect={item.action}
                     className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
                   >
-                    <ClipboardList className="text-muted-foreground h-5 w-5 shrink-0" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">{STRINGS.palette.copyAnswer}</span>
+                    <item.icon className={cn('h-4 w-4 shrink-0', item.iconClassName)} aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                    <span className="text-muted-foreground max-w-[160px] shrink-0 truncate text-xs">
+                      {item.subtitle}
+                    </span>
                   </Command.Item>
-                </Command.Group>
-              )}
-              {results.length > 0 &&
-                SECTION_ORDER.map((group) => {
-                  if (group === 'calculator' && calcResult) return null
-                  const items = groupedResults[group]
-                  if (items.length === 0) return null
-                  return (
-                    <Command.Group key={group} heading={getGroupLabel(group)}>
-                      {items.map((result) => (
-                        <div key={`${group}-${result.id}`}>
-                          <Command.Item
-                            value={`result:${result.id}`}
-                            onSelect={() => selectSearchResult(result)}
-                            className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
-                          >
-                            <ResultIcon result={result} showAppIcons={showAppIcons} />
-                            <span className="min-w-0 flex-1 truncate">{result.title}</span>
-                            {result.subtitle &&
-                              !(
-                                result.type === 'app' &&
-                                result.subtitle.toLowerCase() === 'application'
-                              ) && (
-                                <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
-                                  {result.subtitle}
-                                </span>
-                              )}
-                            <span className="bg-muted/70 text-muted-foreground shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-                              {getCategoryLabel(result.type)}
-                            </span>
-                          </Command.Item>
-                        </div>
-                      ))}
-                    </Command.Group>
-                  )
-                })}
-              {!isEmptyQuery && (
-                <Command.Group
-                  heading={STRINGS.palette.useQueryWith.replace('{{query}}', query.trim())}
-                >
-                  {SEARCH_ENGINES.map((engine) => (
+                ))}
+              </Command.Group>
+            )}
+
+            {isRootMode && !isLoading && (
+              <>
+                {results.length === 0 && !shouldShowStartSuggestions && !calcResult && (
+                  <Command.Empty className="text-muted-foreground py-8 text-center text-sm">
+                    {STRINGS.palette.empty}
+                  </Command.Empty>
+                )}
+                {calcResult && (
+                  <Command.Group key="calculator-block" heading={STRINGS.palette.calculator}>
+                    <div className="bg-muted/40 flex items-stretch gap-4 rounded-lg px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-muted-foreground text-xs font-medium">
+                          {STRINGS.palette.calculatorExpression}
+                        </p>
+                        <p className="text-foreground text-lg font-semibold tracking-tight">
+                          {calcResult.expression.replace(/\//g, '÷')}
+                        </p>
+                      </div>
+                      <span className="text-muted-foreground shrink-0 self-center" aria-hidden>
+                        →
+                      </span>
+                      <div className="min-w-0 flex-1 text-right">
+                        <p className="text-muted-foreground text-xs font-medium">
+                          {STRINGS.palette.calculatorResult}
+                        </p>
+                        <p className="text-foreground text-lg font-semibold tracking-tight">
+                          {calcResult.value}
+                        </p>
+                      </div>
+                    </div>
                     <Command.Item
-                      key={engine.id}
-                      value={`web-search:${engine.id}:${query.trim()}`}
+                      value="calc-copy"
                       onSelect={() => {
-                        const url = engine.url.replace('{{q}}', encodeURIComponent(query.trim()))
-                        if (isTauriRuntime()) {
-                          void import('@tauri-apps/plugin-shell').then(({ open }) => open(url))
-                        } else {
-                          window.open(url, '_blank', 'noopener')
+                        if (calcResult && isTauriRuntime()) {
+                          setLastClipboardContent(calcResult.value)
+                          void import('@tauri-apps/plugin-clipboard-manager').then(
+                            ({ writeText }) => writeText(calcResult.value),
+                          )
+                          hideWindow()
                         }
-                        hideWindow()
                       }}
                       className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
                     >
-                      <Search className="text-muted-foreground h-5 w-5 shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate">{engine.name}</span>
-                      <span className="text-muted-foreground shrink-0 truncate text-xs">
-                        {STRINGS.palette.webSearches}
-                      </span>
+                      <ClipboardList
+                        className="text-muted-foreground h-5 w-5 shrink-0"
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1 truncate">{STRINGS.palette.copyAnswer}</span>
                     </Command.Item>
-                  ))}
-                </Command.Group>
-              )}
-            </>
-          )}
+                  </Command.Group>
+                )}
+                {results.length > 0 &&
+                  SECTION_ORDER.map((group) => {
+                    if (group === 'calculator' && calcResult) return null
+                    const items = groupedResults[group]
+                    if (items.length === 0) return null
+                    return (
+                      <Command.Group key={group} heading={getGroupLabel(group)}>
+                        {items.map((result) => (
+                          <div key={`${group}-${result.id}`}>
+                            <Command.Item
+                              value={`result:${result.id}`}
+                              onSelect={() => selectSearchResult(result)}
+                              className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
+                            >
+                              <ResultIcon result={result} showAppIcons={showAppIcons} />
+                              <span className="min-w-0 flex-1 truncate">{result.title}</span>
+                              {result.subtitle &&
+                                !(
+                                  result.type === 'app' &&
+                                  result.subtitle.toLowerCase() === 'application'
+                                ) && (
+                                  <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
+                                    {result.subtitle}
+                                  </span>
+                                )}
+                              <span className="bg-muted/70 text-muted-foreground shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+                                {getCategoryLabel(result.type)}
+                              </span>
+                            </Command.Item>
+                          </div>
+                        ))}
+                      </Command.Group>
+                    )
+                  })}
+                {!isEmptyQuery && (
+                  <Command.Group
+                    heading={STRINGS.palette.useQueryWith.replace('{{query}}', query.trim())}
+                  >
+                    {SEARCH_ENGINES.map((engine) => (
+                      <Command.Item
+                        key={engine.id}
+                        value={`web-search:${engine.id}:${query.trim()}`}
+                        onSelect={() => {
+                          const url = engine.url.replace('{{q}}', encodeURIComponent(query.trim()))
+                          if (isTauriRuntime()) {
+                            void import('@tauri-apps/plugin-shell').then(({ open }) => open(url))
+                          } else {
+                            window.open(url, '_blank', 'noopener')
+                          }
+                          hideWindow()
+                        }}
+                        className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
+                      >
+                        <Search className="text-muted-foreground h-5 w-5 shrink-0" aria-hidden />
+                        <span className="min-w-0 flex-1 truncate">{engine.name}</span>
+                        <span className="text-muted-foreground shrink-0 truncate text-xs">
+                          {STRINGS.palette.webSearches}
+                        </span>
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                )}
+              </>
+            )}
           </Command.List>
         )}
 
@@ -2127,70 +2228,132 @@ export function PalettePage() {
           </div>
         )}
 
+        {isFooterMenuOpen && footerMenuActions.length > 0 && (
+          <div className="pointer-events-none absolute left-3 bottom-12 z-20 w-[240px]">
+            <div
+              ref={footerMenuPanelRef}
+              className="border-border/70 bg-background/92 pointer-events-auto rounded-xl border p-1.5 shadow-xl backdrop-blur-md"
+            >
+              <p className="text-muted-foreground px-2 py-1 text-[10px] font-semibold tracking-wide uppercase">
+                Menu
+              </p>
+              <div className="mt-1 space-y-1" role="menu" aria-label="Footer menu">
+                {footerMenuActions.map((action, index) => {
+                  const ActionIcon = action.icon
+                  const isSelected = index === selectedFooterMenuIndex
+                  return (
+                    <button
+                      key={action.id}
+                      ref={(element) => {
+                        footerMenuItemRefs.current[index] = element
+                      }}
+                      type="button"
+                      role="menuitem"
+                      onMouseEnter={() => setSelectedFooterMenuIndex(index)}
+                      onFocus={() => setSelectedFooterMenuIndex(index)}
+                      onClick={() => {
+                        closeFooterMenu({ focusButton: true })
+                        action.onSelect()
+                      }}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70',
+                        isSelected
+                          ? 'border-ring/45 bg-accent text-foreground shadow-sm'
+                          : 'text-foreground/90 hover:border-ring/35 hover:bg-accent/70 border-transparent',
+                      )}
+                    >
+                      <ActionIcon
+                        className="text-muted-foreground h-3.5 w-3.5 shrink-0"
+                        aria-hidden
+                      />
+                      <span className="truncate">{action.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {!isCompactEmpty && (
           <div className="border-border/70 text-muted-foreground flex shrink-0 items-center justify-between border-t px-3 py-2 text-[11px]">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
+            <div className="flex items-center gap-1">
+              <button
+                ref={footerMenuButtonRef}
+                type="button"
+                aria-label="Menu"
+                aria-haspopup="menu"
+                aria-expanded={isFooterMenuOpen}
                 onClick={() => {
-                  if (isClipboardMode && selectedClipboardEntry) {
-                    copyAndClose(selectedClipboardEntry)
-                    return
-                  }
-                  if (selectedCommandValue === 'calc-copy' && calcResult && isTauriRuntime()) {
-                    setLastClipboardContent(calcResult.value)
-                    void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
-                      writeText(calcResult.value),
-                    )
-                    hideWindow()
-                    return
-                  }
-                  if (selectedSearchResult) {
-                    selectSearchResult(selectedSearchResult)
-                    return
-                  }
-                  if (selectedStartSuggestion) {
-                    selectedStartSuggestion.action()
-                    return
-                  }
-                  results[0]?.action()
+                  setIsFooterMenuOpen((current) => !current)
+                  setSelectedFooterMenuIndex(0)
                 }}
-                className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
+                className={cn(
+                  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground cursor-pointer transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 disabled:pointer-events-none disabled:opacity-50',
+                  'hover:bg-[hsl(var(--accent))] hover:text-accent-foreground',
+                  isFooterMenuOpen && 'bg-[hsl(var(--accent))] text-accent-foreground',
+                )}
               >
-                {isClipboardMode
-                  ? STRINGS.palette.actionPaste
-                  : selectedCommandValue === 'calc-copy' && calcResult
-                    ? STRINGS.palette.copyAnswer
-                    : STRINGS.palette.openCommand}
-              </Button>
-              {isClipboardMode && (
+                <MoreHorizontal className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-lg px-1 py-0.5 transition-colors hover:bg-[hsl(var(--accent))]">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => void clearInBackend()}
-                  className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
+                  onClick={() => {
+                    if (isClipboardMode && selectedClipboardEntry) {
+                      copyAndClose(selectedClipboardEntry)
+                      return
+                    }
+                    if (selectedCommandValue === 'calc-copy' && calcResult && isTauriRuntime()) {
+                      setLastClipboardContent(calcResult.value)
+                      void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) =>
+                        writeText(calcResult.value),
+                      )
+                      hideWindow()
+                      return
+                    }
+                    if (selectedSearchResult) {
+                      selectSearchResult(selectedSearchResult)
+                      return
+                    }
+                    if (selectedStartSuggestion) {
+                      selectedStartSuggestion.action()
+                      return
+                    }
+                    results[0]?.action()
+                  }}
+                  className="h-7 border border-transparent cursor-pointer bg-transparent px-2 text-[11px] hover:bg-transparent hover:text-foreground"
                 >
-                  {STRINGS.palette.clearAll}
+                  {isClipboardMode
+                    ? STRINGS.palette.actionPaste
+                    : selectedCommandValue === 'calc-copy' && calcResult
+                      ? STRINGS.palette.copyAnswer
+                      : STRINGS.palette.openCommand}
                 </Button>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-pressed={isActionsView}
-                onClick={toggleActionsView}
-                className="hover:border-ring/40 hover:bg-accent/90 h-7 border border-transparent px-2 text-[11px]"
+                <Kbd>↵</Kbd>
+              </div>
+
+              <div
+                className={cn(
+                  'flex items-center rounded-lg px-1 py-0.5 transition-colors hover:bg-[hsl(var(--accent))]',
+                  isActionsView && 'bg-[hsl(var(--accent))] text-accent-foreground',
+                )}
               >
-                {STRINGS.palette.actions}
-              </Button>
-              <Kbd>Ctrl K</Kbd>
-              {!isClipboardMode && commandExplainText && (
-                <span className="text-muted-foreground/95 ml-1 max-w-[220px] truncate text-[10px]">
-                  {commandExplainText}
-                </span>
-              )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={isActionsView}
+                  onClick={toggleActionsView}
+                  className="h-7 border border-transparent bg-transparent px-2 text-[11px] hover:bg-transparent hover:text-foreground aria-pressed:ring-0 aria-pressed:border-transparent cursor-pointer"
+                >
+                  {STRINGS.palette.actions}
+                </Button>
+                <Kbd>Ctrl K</Kbd>
+              </div>
             </div>
           </div>
         )}

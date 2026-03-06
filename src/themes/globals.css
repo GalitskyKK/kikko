@@ -14,7 +14,8 @@
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
     --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
+    /* Выделение/ховер: один источник правды для списков, футера, клипборда */
+    --accent: 240 5% 90%;
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
@@ -46,7 +47,8 @@
     --secondary-foreground: 0 0% 96%;
     --muted: 240 8% 12%;
     --muted-foreground: 0 0% 55%;
-    --accent: 240 8% 14%;
+    /* Выделение/ховер: один источник правды */
+    --accent: 240 5% 26%;
     --accent-foreground: 0 0% 98%;
     --destructive: 352 80% 55%;
     --destructive-foreground: 0 0% 98%;
@@ -140,29 +142,32 @@
   }
 
   [cmdk-item]:not([data-selected="true"]):not([data-keyboard-selected="true"]):hover {
-    background: hsl(var(--accent) / 0.86);
-    border-color: hsl(var(--ring) / 0.46);
+    background: hsl(var(--accent) / 0.72);
+    border-color: transparent;
+    box-shadow: none;
   }
   [cmdk-item][data-selected="true"],
   [cmdk-item][data-keyboard-selected="true"] {
-    background: hsl(var(--accent) / 0.98);
-    border-color: hsl(var(--ring) / 0.62);
-    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.48);
+    background: hsl(var(--accent) / 0.92);
+    border-color: transparent;
+    box-shadow: none;
   }
   .dark [cmdk-item][data-selected="true"],
   .dark [cmdk-item][data-keyboard-selected="true"] {
-    background: linear-gradient(90deg, hsl(var(--accent) / 0.92) 0%, hsl(var(--accent) / 0.64) 100%);
-    border-color: hsl(var(--ring) / 0.36);
+    background: hsl(var(--accent) / 0.78);
+    border-color: transparent;
+    box-shadow: none;
   }
   /* Подсветка выбора стрелками (state в палетке), если data-атрибут не на [cmdk-item] */
   .palette-panel .keyboard-selected {
-    background: hsl(var(--accent) / 0.98) !important;
-    border-color: hsl(var(--ring) / 0.62) !important;
-    box-shadow: 0 0 0 1px hsl(var(--ring) / 0.48);
+    background: hsl(var(--accent) / 0.92) !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
   }
   .dark .palette-panel .keyboard-selected {
-    background: linear-gradient(90deg, hsl(var(--accent) / 0.92) 0%, hsl(var(--accent) / 0.64) 100%) !important;
-    border-color: hsl(var(--ring) / 0.36) !important;
+    background: hsl(var(--accent) / 0.78) !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
   }
   [cmdk-group] {
     overflow: visible;
@@ -286,11 +291,11 @@
 
   :root[data-accent='default'] {
     --ring: 240 5.9% 10%;
-    --accent: 240 4.8% 95.9%;
+    --accent: 240 4% 82%;
   }
   .dark:root[data-accent='default'] {
     --ring: 0 0% 60%;
-    --accent: 240 8% 14%;
+    --accent: 240 5% 26%;
   }
 
   :root[data-accent='blue'] {

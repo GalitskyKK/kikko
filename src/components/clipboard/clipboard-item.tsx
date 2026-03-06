@@ -29,10 +29,10 @@ export function ClipboardItem({
       role="option"
       aria-selected={selected}
       className={cn(
-        'group flex min-h-[58px] cursor-pointer items-center gap-3 rounded-xl border px-2.5 py-2 text-sm transition-colors',
+        'group flex min-h-[58px] cursor-pointer items-center gap-3 rounded-xl border border-transparent px-2.5 py-2 text-sm transition-colors',
         selected
-          ? 'border-ring/60 bg-accent text-accent-foreground shadow-[0_0_0_1px_hsl(var(--ring)/0.35)]'
-          : 'border-transparent text-foreground hover:bg-accent/70',
+          ? 'bg-[hsl(var(--accent))] text-foreground'
+          : 'text-foreground hover:bg-[hsl(var(--accent)/0.85)]',
       )}
       onMouseDown={(event) => {
         // Не даём инпуту потерять фокус при клике — как в Raycast.
@@ -42,8 +42,10 @@ export function ClipboardItem({
     >
       <ClipboardPreview entry={entry} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{entry.preview || entry.content.slice(0, 100)}</p>
-        <p className="truncate text-xs text-muted-foreground">
+        <p className="truncate text-sm font-medium">
+          {entry.preview || entry.content.slice(0, 100)}
+        </p>
+        <p className="text-muted-foreground truncate text-xs">
           {entry.appSource ?? 'Clipboard'}
           {entry.charCount > 0 ? ` • ${entry.charCount} chars` : ''}
         </p>
