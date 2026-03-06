@@ -6,6 +6,8 @@ import { isTauriRuntime } from '@/lib/tauri'
 const SETTINGS_WINDOW_LABEL = 'settings-window'
 const DASHBOARD_WINDOW_LABEL = 'dashboard-window'
 
+const pendingOpens = new Set<string>()
+
 export async function openSettingsWindow(): Promise<void> {
   await openDetachedWindow({
     label: SETTINGS_WINDOW_LABEL,
@@ -57,6 +59,9 @@ async function openDetachedWindow({
       return
     }
 
+    if (pendingOpens.has(label)) return
+    pendingOpens.add(label)
+
     const detachedWindow = new WebviewWindow(label, {
       url: path,
       title,
@@ -71,6 +76,7 @@ async function openDetachedWindow({
     })
 
     detachedWindow.once('tauri://created', async () => {
+      pendingOpens.delete(label)
       try {
         await detachedWindow.show()
         await detachedWindow.setFocus()
@@ -79,6 +85,7 @@ async function openDetachedWindow({
       }
     })
     detachedWindow.once('tauri://error', (error) => {
+      pendingOpens.delete(label)
       logger.warn('detached window creation failed', { error, label })
     })
   } catch (error) {

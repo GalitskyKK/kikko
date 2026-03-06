@@ -6,6 +6,7 @@ import {
   Keyboard,
   Layers,
   Link,
+  Lock,
   Monitor,
   Moon,
   Palette,
@@ -19,15 +20,23 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { useTheme } from 'next-themes'
+import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import { PageShell } from '@/components/shared/page-shell'
 import { Button } from '@/components/ui/button'
 import { Panel } from '@/components/ui/panel'
+import { ShortcutKeys } from '@/components/ui/kbd'
 import { isTauriRuntime } from '@/lib/tauri'
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { usePluginStore } from '@/stores/plugin-store'
 import { useQuicklinkStore } from '@/stores/quicklink-store'
 import { useSnippetStore } from '@/stores/snippet-store'
-import { useSettingsStore, type AccentPreset, type UiDensity } from '@/stores/settings-store'
+import {
+  useSettingsStore,
+  type AccentPreset,
+  type CustomShortcutBinding,
+  type UiDensity,
+} from '@/stores/settings-store'
 import { cn } from '@/utils/cn'
 
 type SettingsSectionId =
@@ -57,6 +66,12 @@ const SETTINGS_SECTIONS: Array<{
   { id: 'plugins', label: 'Plugins', icon: Plug },
 ]
 
+const SYSTEM_SHORTCUT_ACTIONS: Array<{ actionId: string; label: string; icon: ComponentType<{ className?: string }> }> = [
+  { actionId: 'system:lock', label: 'Lock Screen', icon: Lock },
+  { actionId: 'system:empty-trash', label: 'Empty Recycle Bin', icon: Trash2 },
+  { actionId: 'system:sleep', label: 'Sleep / Hibernate', icon: Moon },
+]
+
 /** Страница настроек */
 export function SettingsPage() {
   const { setTheme, resolvedTheme } = useTheme()
@@ -72,6 +87,7 @@ export function SettingsPage() {
     updateClipboard,
     updateExtensions,
     updateHotkeys,
+    upsertCustomShortcut,
     upsertAlias,
     removeAlias,
   } = useSettingsStore()
@@ -161,13 +177,20 @@ export function SettingsPage() {
     )
   }, [apps, snippets])
 
-  const hotkeysNormalized = useMemo(
-    () =>
-      [hotkeys.openPalette, hotkeys.openDashboard, hotkeys.openSettings].map((value) =>
-        value.trim().toLowerCase(),
-      ),
-    [hotkeys.openDashboard, hotkeys.openPalette, hotkeys.openSettings],
-  )
+  const hotkeysNormalized = useMemo(() => {
+    const main = [hotkeys.openPalette, hotkeys.openDashboard, hotkeys.openSettings].map((v) =>
+      v.trim().toLowerCase(),
+    )
+    const custom = hotkeys.customShortcuts
+      .filter((c) => c.enabled && c.hotkey.trim())
+      .map((c) => c.hotkey.trim().toLowerCase())
+    return [...main, ...custom]
+  }, [
+    hotkeys.openPalette,
+    hotkeys.openDashboard,
+    hotkeys.openSettings,
+    hotkeys.customShortcuts,
+  ])
 
   const handleSnippetEdit = (id: string) => {
     const snippet = snippets.find((item) => item.id === id)
@@ -513,37 +536,58 @@ export function SettingsPage() {
                   Shortcuts
                 </h2>
                 <p className="text-muted-foreground text-xs">
-                  Active shortcuts: Win+Shift+K (palette), Win+J (dashboard), Win+Shift+, (settings).
-                  Custom bindings below are saved for display; applying them is planned.
+                  Global hotkeys are applied immediately. On Windows you can set Alt+Space via the
+                  preset (system menu blocks recording).
                 </p>
               </div>
               <SettingsShortcutRow
                 label="Open palette"
-                description="Primary launcher. Click Bind, then press the key combination."
+                description="Primary launcher."
                 value={hotkeys.openPalette}
                 onChange={(value) => updateHotkeys({ openPalette: value })}
+                presetAltSpace
               />
               <SettingsShortcutRow
                 label="Open dashboard"
-                description="Quick dashboard. Click Bind, then press the key combination."
+                description="Quick dashboard."
                 value={hotkeys.openDashboard}
                 onChange={(value) => updateHotkeys({ openDashboard: value })}
               />
               <SettingsShortcutRow
                 label="Open settings"
-                description="Open settings. Click Bind, then press the key combination."
+                description="Open settings."
                 value={hotkeys.openSettings}
                 onChange={(value) => updateHotkeys({ openSettings: value })}
               />
-              <p className="text-muted-foreground text-[11px]">
-                Bindings are saved; only the defaults above are active until runtime rebinding is wired.
-              </p>
-              <div className="border-border/50 bg-muted/20 mt-3 rounded-lg border border-dashed px-3 py-2">
-                <p className="text-muted-foreground text-xs">
-                  <strong className="text-foreground/90">Per-app shortcuts:</strong> assign a global
-                  hotkey to open a specific app or action (e.g. Super+1 for App) — planned; for now use
-                  Aliases and type the keyword in the palette.
+              <div className="border-border/50 mt-4 border-t pt-4">
+                <h3 className="text-foreground mb-3 text-xs font-semibold uppercase tracking-wider">
+                  System
+                </h3>
+                <p className="text-muted-foreground mb-3 text-xs">
+                  Assign hotkeys to system actions. Enable and bind each row.
                 </p>
+                <div className="space-y-3">
+                  {SYSTEM_SHORTCUT_ACTIONS.map(({ actionId, label, icon: Icon }) => {
+                    const binding =
+                      hotkeys.customShortcuts.find((c) => c.actionId === actionId) ??
+                      ({
+                        id: actionId,
+                        actionId,
+                        hotkey: '',
+                        enabled: false,
+                      } satisfies CustomShortcutBinding)
+                    return (
+                      <SettingsCustomShortcutRow
+                        key={actionId}
+                        label={label}
+                        icon={Icon}
+                        binding={binding}
+                        onBindingChange={(next) => upsertCustomShortcut(next)}
+                        conflictWith={hotkeysNormalized}
+                      />
+                    )
+                  })}
+                </div>
               </div>
             </Panel>
           )}
@@ -1064,16 +1108,30 @@ function SettingsShortcutRow({
   description,
   value,
   onChange,
+  presetAltSpace = false,
 }: {
   label: string
   description: string
   value: string
   onChange: (value: string) => void
+  /** Показать кнопку «Alt+Space» и поддержка записи по нажатию (Windows: хук перехватывает Alt+Space). */
+  presetAltSpace?: boolean
 }) {
   const [recording, setRecording] = useState(false)
 
   useEffect(() => {
     if (!recording) return
+    let unlistenShortcutRecorded: (() => void) | undefined
+    if (presetAltSpace && isTauriRuntime()) {
+      void invoke('start_alt_space_recording')
+      listen<string>('shortcut-recorded', () => {
+        onChange('Alt+Space')
+        void invoke('stop_alt_space_recording', { restore_palette_hook: true })
+        setRecording(false)
+      }).then((fn) => {
+        unlistenShortcutRecorded = fn
+      })
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       event.preventDefault()
       event.stopPropagation()
@@ -1085,8 +1143,14 @@ function SettingsShortcutRow({
       }
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [recording, onChange])
+    return () => {
+      unlistenShortcutRecorded?.()
+      if (presetAltSpace && isTauriRuntime()) {
+        void invoke('stop_alt_space_recording', { restore_palette_hook: value === 'Alt+Space' })
+      }
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
+    }
+  }, [recording, presetAltSpace, value, onChange])
 
   return (
     <div className="flex items-start justify-between gap-4">
@@ -1096,11 +1160,28 @@ function SettingsShortcutRow({
       </div>
       <div className="flex items-center gap-2">
         <span
-          className="border-border/70 bg-background text-foreground min-w-[120px] rounded-md border px-2 py-1.5 text-center text-sm tabular-nums"
+          className="border-border/70 bg-background flex min-h-8 min-w-[120px] items-center justify-center rounded-md border px-3 py-1.5"
           aria-live="polite"
         >
-          {recording ? 'Press keys…' : value || '—'}
+          {recording ? (
+            <span className="text-muted-foreground text-sm">Press keys…</span>
+          ) : value ? (
+            <ShortcutKeys shortcut={value} />
+          ) : (
+            <span className="text-muted-foreground text-sm">—</span>
+          )}
         </span>
+        {presetAltSpace && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => onChange('Alt+Space')}
+            className="shrink-0"
+          >
+            <ShortcutKeys shortcut="Alt+Space" />
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"
@@ -1111,6 +1192,89 @@ function SettingsShortcutRow({
           {recording ? 'Cancel' : 'Bind'}
         </Button>
       </div>
+    </div>
+  )
+}
+
+/** Строка для кастомного шортката (системное действие): иконка, лейбл, Bind, включён. */
+function SettingsCustomShortcutRow({
+  label,
+  icon: Icon,
+  binding,
+  onBindingChange,
+  conflictWith,
+}: {
+  label: string
+  icon: ComponentType<{ className?: string }>
+  binding: CustomShortcutBinding
+  onBindingChange: (next: CustomShortcutBinding) => void
+  conflictWith: string[]
+}) {
+  const [recording, setRecording] = useState(false)
+
+  useEffect(() => {
+    if (!recording) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (['Meta', 'Control', 'Alt', 'Shift'].includes(event.key)) return
+      const shortcut = formatShortcutFromEvent(event)
+      if (shortcut) {
+        onBindingChange({ ...binding, hotkey: shortcut })
+        setRecording(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [recording, binding, onBindingChange])
+
+  const norm = binding.hotkey.trim().toLowerCase()
+  const hasConflict =
+    norm.length > 0 && conflictWith.filter((n) => n === norm).length > 1
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-4 rounded-lg border border-border/50 bg-muted/10 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Icon className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden />
+          <span className="text-foreground text-sm font-medium">{label}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className="border-border/70 bg-background flex min-h-8 min-w-[100px] items-center justify-center rounded-md border px-3 py-1.5"
+            aria-live="polite"
+          >
+            {recording ? (
+              <span className="text-muted-foreground text-sm">Press keys…</span>
+            ) : binding.hotkey ? (
+              <ShortcutKeys shortcut={binding.hotkey} />
+            ) : (
+              <span className="text-muted-foreground text-sm">—</span>
+            )}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="muted"
+            onClick={() => setRecording((r) => !r)}
+            aria-pressed={recording}
+          >
+            {recording ? 'Cancel' : 'Record'}
+          </Button>
+          <label className="text-muted-foreground flex items-center gap-1.5 text-xs">
+            <input
+              type="checkbox"
+              checked={binding.enabled}
+              onChange={(e) => onBindingChange({ ...binding, enabled: e.target.checked })}
+              className="rounded border-border"
+            />
+            Enable
+          </label>
+        </div>
+      </div>
+      {hasConflict && (
+        <p className="text-destructive text-[11px]">Same hotkey as another action.</p>
+      )}
     </div>
   )
 }

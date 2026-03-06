@@ -78,6 +78,7 @@ export function DashboardPage() {
     if (!isTauriRuntime()) return
     void import('@tauri-apps/api/window').then(({ getCurrentWindow, LogicalSize }) => {
       const currentWindow = getCurrentWindow()
+      if (currentWindow.label !== 'dashboard-window') return
       void currentWindow.setSize(new LogicalSize(1180, 760))
       void currentWindow.center()
     })

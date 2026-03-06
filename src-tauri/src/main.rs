@@ -1,5 +1,6 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
+mod alt_space;
 mod commands;
 mod db;
 
@@ -26,15 +27,10 @@ fn move_palette_top_center(window: &tauri::WebviewWindow) {
 }
 
 fn main() {
-  let palette_shortcut = Shortcut::new(
-    Some(Modifiers::SUPER | Modifiers::SHIFT),
-    Code::KeyK,
-  );
-  let dashboard_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyJ);
-  let settings_shortcut = Shortcut::new(
-    Some(Modifiers::SUPER | Modifiers::SHIFT),
-    Code::Comma,
-  );
+  // Дефолтные шорткаты: работают сразу при старте. Фронт может перерегистрировать через apply_global_hotkeys.
+  let default_palette = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK);
+  let default_dashboard = Shortcut::new(Some(Modifiers::SUPER), Code::KeyJ);
+  let default_settings = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Comma);
 
   let clipboard_migrations = vec![Migration {
     version: 1,
@@ -51,17 +47,13 @@ fn main() {
   tauri::Builder::default()
     .plugin(
       tauri_plugin_global_shortcut::Builder::new()
-        .with_shortcuts([
-          palette_shortcut.clone(),
-          dashboard_shortcut.clone(),
-          settings_shortcut.clone(),
-        ])
-        .expect("invalid shortcut")
+        .with_shortcuts([default_palette.clone(), default_dashboard.clone(), default_settings.clone()])
+        .expect("default shortcuts")
         .with_handler(move |app, shortcut, event| {
           if event.state != ShortcutState::Pressed {
             return;
           }
-          if shortcut == &palette_shortcut {
+          if shortcut == &default_palette {
             if let Some(window) = app.get_webview_window("main") {
               if window.is_visible().unwrap_or(false) {
                 let _ = window.hide();
@@ -72,11 +64,11 @@ fn main() {
                 let _ = window.set_focus();
               }
             }
-          } else if shortcut == &dashboard_shortcut {
+          } else if shortcut == &default_dashboard {
             if let Some(window) = app.get_webview_window("main") {
               let _ = window.emit("navigate-to", "/dashboard");
             }
-          } else if shortcut == &settings_shortcut {
+          } else if shortcut == &default_settings {
             if let Some(window) = app.get_webview_window("main") {
               let _ = window.emit("navigate-to", "/settings");
             }
@@ -127,10 +119,16 @@ fn main() {
       commands::quicklinks::create_quicklink,
       commands::quicklinks::update_quicklink,
       commands::quicklinks::delete_quicklink,
+      commands::system::get_platform,
       commands::system::exit_app,
+      commands::system::run_shortcut_action,
       commands::system::show_palette_or_toggle,
+      alt_space::set_alt_space_palette_enabled,
+      alt_space::start_alt_space_recording,
+      alt_space::stop_alt_space_recording,
     ])
     .setup(|app| {
+      app.manage(alt_space::AltSpaceState::new());
       db::initialize(&app.handle())?;
 
       let db_path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("kikko.db");

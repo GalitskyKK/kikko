@@ -43,10 +43,18 @@ interface ClipboardSettings {
   captureFiles: boolean
 }
 
+export interface CustomShortcutBinding {
+  id: string
+  actionId: string
+  hotkey: string
+  enabled: boolean
+}
+
 interface HotkeysSettings {
   openPalette: string
   openDashboard: string
   openSettings: string
+  customShortcuts: CustomShortcutBinding[]
 }
 
 interface SettingsState {
@@ -62,6 +70,7 @@ interface SettingsState {
   updateClipboard: (patch: Partial<ClipboardSettings>) => void
   updateExtensions: (patch: Partial<ExtensionsSettings>) => void
   updateHotkeys: (patch: Partial<HotkeysSettings>) => void
+  upsertCustomShortcut: (binding: CustomShortcutBinding) => void
   upsertAlias: (rule: AliasRule) => void
   removeAlias: (id: string) => void
 }
@@ -83,6 +92,7 @@ const defaultSettings: Omit<
   | 'updateClipboard'
   | 'updateExtensions'
   | 'updateHotkeys'
+  | 'upsertCustomShortcut'
   | 'upsertAlias'
   | 'removeAlias'
 > = {
@@ -109,6 +119,7 @@ const defaultSettings: Omit<
     openPalette: 'Super+Shift+K',
     openDashboard: 'Super+J',
     openSettings: 'Super+Shift+,',
+    customShortcuts: [],
   },
   extensions: {
     clipboard: true,
@@ -137,12 +148,19 @@ function buildSnapshot(state: SettingsState): SettingsSnapshot {
 }
 
 function mergeWithDefaults(snapshot: Partial<SettingsSnapshot> | undefined): SettingsSnapshot {
+  const hotkeysSnapshot = snapshot?.hotkeys as Partial<HotkeysSettings> | undefined
   return {
     updatedAt: snapshot?.updatedAt ?? defaultSettings.updatedAt,
     general: { ...defaultSettings.general, ...(snapshot?.general ?? {}) },
     appearance: { ...defaultSettings.appearance, ...(snapshot?.appearance ?? {}) },
     clipboard: { ...defaultSettings.clipboard, ...(snapshot?.clipboard ?? {}) },
-    hotkeys: { ...defaultSettings.hotkeys, ...(snapshot?.hotkeys ?? {}) },
+    hotkeys: {
+      ...defaultSettings.hotkeys,
+      ...hotkeysSnapshot,
+      customShortcuts: Array.isArray(hotkeysSnapshot?.customShortcuts)
+        ? hotkeysSnapshot.customShortcuts
+        : defaultSettings.hotkeys.customShortcuts,
+    },
     extensions: { ...defaultSettings.extensions, ...(snapshot?.extensions ?? {}) },
     aliases: Array.isArray(snapshot?.aliases) ? snapshot.aliases : [],
   }
@@ -215,6 +233,17 @@ export const useSettingsStore = create<SettingsState>()(
             updatedAt: Date.now(),
             hotkeys: { ...state.hotkeys, ...patch },
           }))
+          broadcast()
+        },
+        upsertCustomShortcut: (binding) => {
+          set((state) => {
+            const next = state.hotkeys.customShortcuts.filter((c) => c.id !== binding.id)
+            next.push(binding)
+            return {
+              updatedAt: Date.now(),
+              hotkeys: { ...state.hotkeys, customShortcuts: next },
+            }
+          })
           broadcast()
         },
         upsertAlias: (rule) => {

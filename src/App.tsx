@@ -22,6 +22,7 @@ import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { useSettingsStore } from '@/stores/settings-store'
 import { logger } from '@/utils/logger'
 import { useTray } from '@/lib/use-tray'
+import { useGlobalShortcuts } from '@/lib/use-global-shortcuts'
 
 /** Хук: подписка на навигацию из Rust (шорткат Win+J → dashboard и др.) */
 function useNavigateFromBackend() {
@@ -42,8 +43,12 @@ function useNavigateFromBackend() {
       }
       if (path.startsWith('/')) ref.current(path)
     })
+    const unlistenTrigger = listen('trigger-palette', () => {
+      void invoke('show_palette_or_toggle')
+    })
     return () => {
       unlistenPromise.then((fn) => fn())
+      unlistenTrigger.then((fn) => fn())
     }
   }, [])
 }
@@ -169,10 +174,20 @@ function useSettingsSyncOnWindowFocus() {
 export function App() {
   const appearance = useSettingsStore((state) => state.appearance)
   useTray()
+  useGlobalShortcuts()
   useClipboardPolling()
   usePreloadSearchData()
   useApplyAutostartOnStartup()
   useSettingsSyncOnWindowFocus()
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === ' ' && e.altKey) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [])
 
   useEffect(() => {
     const root = document.documentElement

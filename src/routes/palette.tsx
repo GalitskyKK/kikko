@@ -187,7 +187,7 @@ export function PalettePage() {
       },
       {
         id: 'footer-github',
-        label: 'GitHub',
+        label: 'Kikko GitHub',
         icon: Link,
         onSelect: () => {
           if (isTauriRuntime()) {

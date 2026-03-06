@@ -97,10 +97,36 @@ pub async fn open_windows_settings(section_id: String) -> Result<(), String> {
   open_system_preferences(section_id).await
 }
 
+/// Возвращает платформу: "windows" | "macos" | "linux" (для условной логики на фронте).
+#[tauri::command]
+pub fn get_platform() -> &'static str {
+  std::env::consts::OS
+}
+
 /// Завершает приложение (для пункта «Выход» в трее).
 #[tauri::command]
 pub fn exit_app(app: tauri::AppHandle) {
   app.exit(0);
+}
+
+/// Выполняет действие по ID (для кастомных глобальных шорткатов).
+#[tauri::command]
+pub async fn run_shortcut_action(action_id: String) -> Result<(), String> {
+  match action_id.as_str() {
+    "system:lock" => {
+      let _ = run_lock();
+      Ok(())
+    }
+    "system:empty-trash" => {
+      let _ = run_empty_trash();
+      Ok(())
+    }
+    "system:sleep" => {
+      let _ = run_sleep();
+      Ok(())
+    }
+    _ => Err(format!("Unknown shortcut action: {}", action_id)),
+  }
 }
 
 /// Показать/скрыть палетку (вызов с фронта при нажатии глобального шортката).
