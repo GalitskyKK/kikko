@@ -160,9 +160,20 @@ pub async fn get_path_icon_png(app_handle: tauri::AppHandle, path: String) -> Re
       .join("app-icons");
     fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
 
-    let icon_file = cache_dir.join(format!("{}.png", hash_path(trimmed)));
+    // Для .lnk пробуем взять иконку с целевого exe (без стрелки); при ошибке — из самого .lnk
+    let path_for_icon: String = if trimmed.to_lowercase().ends_with(".lnk") {
+      resolve_lnk_target(trimmed).unwrap_or_else(|| trimmed.to_string())
+    } else {
+      trimmed.to_string()
+    };
+
+    let cache_key = hash_path(&path_for_icon);
+    let icon_file = cache_dir.join(format!("{}.png", cache_key));
     if !icon_file.exists() {
-      extract_icon_with_powershell(trimmed, &icon_file)?;
+      if let Err(_) = extract_icon_with_powershell(&path_for_icon, &icon_file) {
+        // Fallback: извлечь из исходного пути (для .lnk вернёт иконку со стрелкой)
+        let _ = extract_icon_with_powershell(trimmed, &icon_file);
+      }
     }
 
     return fs::read(icon_file).map_err(|e| e.to_string());
@@ -174,6 +185,27 @@ pub async fn get_path_icon_png(app_handle: tauri::AppHandle, path: String) -> Re
     let _ = path;
     Err("native app icons are currently windows-only".to_string())
   }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
+  let escaped = lnk_path.replace('\'', "''");
+  let script = format!(
+    r#"$ErrorActionPreference='Stop'; $s=New-Object -ComObject WScript.Shell; $t=$s.CreateShortcut('{escaped}').TargetPath; if ($t) {{ $t }}"#
+  );
+  let out = std::process::Command::new("powershell")
+    .creation_flags(CREATE_NO_WINDOW)
+    .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    .output()
+    .ok()?;
+  if !out.status.success() {
+    return None;
+  }
+  let target = String::from_utf8_lossy(&out.stdout).trim().to_string();
+  if target.is_empty() {
+    return None;
+  }
+  Some(target)
 }
 
 #[cfg(target_os = "windows")]
@@ -193,6 +225,7 @@ fn extract_icon_with_powershell(source_path: &str, output_file: &Path) -> Result
   let status = std::process::Command::new("powershell")
     .creation_flags(CREATE_NO_WINDOW)
     .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    .stderr(std::process::Stdio::null()) // не сыпать FileNotFoundException в консоль при fallback по .lnk
     .status()
     .map_err(|e| e.to_string())?;
 

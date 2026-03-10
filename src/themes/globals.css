@@ -136,8 +136,8 @@
   }
 
   [cmdk-item] {
-    min-height: 40px;
-    padding: 8px 12px;
+    min-height: 44px;
+    padding: 10px 14px;
     border-radius: 10px;
     border: 1px solid transparent;
     color: inherit;
@@ -181,9 +181,30 @@
     overflow: visible;
   }
   .density-compact [cmdk-item] {
-    min-height: 34px;
-    padding: 6px 10px;
+    min-height: 32px;
+    padding: 5px 10px;
     border-radius: 8px;
+  }
+
+  /* Иконки-бейджи в палетке: в compact заметно меньше */
+  .density-compact .palette-icon-badge {
+    height: 26px !important;
+    width: 26px !important;
+    min-height: 26px !important;
+    min-width: 26px !important;
+  }
+  .density-compact .palette-icon-badge svg {
+    height: 13px !important;
+    width: 13px !important;
+  }
+  .density-compact .palette-icon-badge img {
+    height: 16px !important;
+    width: 16px !important;
+  }
+
+  .density-compact [cmdk-group-heading] {
+    padding: 5px 10px 3px;
+    font-size: 10px;
   }
 
   /* Liquid Glass (Apple 2025–2026): полупрозрачность + размытие + глубина */

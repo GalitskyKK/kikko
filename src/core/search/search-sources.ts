@@ -88,6 +88,15 @@ const SYSTEM_COMMANDS: Array<{
   },
 ]
 
+/** Command id in search results may be base id or base id + args suffix, e.g. cmd-volume-set-50 */
+export function getSystemCommandById(resultId: string): (typeof SYSTEM_COMMANDS)[number] | null {
+  for (const cmd of SYSTEM_COMMANDS) {
+    const builtId = cmd.args?.length ? `${cmd.id}-${cmd.args.join('-')}` : cmd.id
+    if (builtId === resultId) return cmd
+  }
+  return null
+}
+
 /** Паттерны для калькулятора: единицы (10 ft in m), % of, даты, timespan, математика */
 export function looksLikeMath(query: string): boolean {
   const trimmed = query.trim()

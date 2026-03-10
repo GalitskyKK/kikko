@@ -2,11 +2,11 @@ import type React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Command } from 'cmdk'
 import { useLocation, useNavigate } from 'react-router-dom'
+import type { IconProps } from '@phosphor-icons/react'
 import {
   AlertTriangle,
   AppWindow,
   ArrowLeft,
-  Calculator,
   ClipboardList,
   Cog,
   FileText,
@@ -19,7 +19,6 @@ import {
   Pin,
   Trash2,
   Zap,
-  Sparkles,
   Link,
 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
@@ -30,7 +29,12 @@ import {
   PhysicalPosition,
 } from '@tauri-apps/api/window'
 import { searchEngine } from '@/core/search/search-engine'
-import { getFileSearchables, getSearchables, looksLikeMath } from '@/core/search/search-sources'
+import {
+  getFileSearchables,
+  getSearchables,
+  getSystemCommandById,
+  looksLikeMath,
+} from '@/core/search/search-sources'
 import type { SearchableWithAction } from '@/core/search/search-types'
 import { calculate } from '@/core/calculator/calculator-engine'
 import { ClipboardList as ClipboardEntriesList } from '@/components/clipboard/clipboard-list'
@@ -39,6 +43,12 @@ import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/sonner'
 import { IconButton } from '@/components/ui/icon-button'
 import { Kbd } from '@/components/ui/kbd'
+import {
+  PaletteIconBadge,
+  getSuggestionIconComponent,
+  getSuggestionIconClassName,
+  getSuggestionIconMeta,
+} from '@/components/palette-icons'
 import {
   PALETTE_HEIGHT_COMPACT_PX,
   PALETTE_HEIGHT_EXPANDED_PX,
@@ -49,6 +59,7 @@ import {
   SECTION_ORDER,
   SEARCH_ENGINES,
   SEARCH_RESULTS_LIMIT,
+  APP_NAME,
 } from '@/lib/constants'
 import {
   EMOJI_LIST,
@@ -66,6 +77,11 @@ import { useClipboardStore, type ClipboardEntry } from '@/stores/clipboard-store
 import { useInstalledAppsStore } from '@/stores/installed-apps-store'
 import { useSearchStore, type SearchResult } from '@/stores/search-store'
 import { useSettingsStore } from '@/stores/settings-store'
+import {
+  useSuggestionUsageStore,
+  sortSuggestionsByRelevance,
+  type FrequentResultMeta,
+} from '@/stores/suggestion-usage-store'
 import { useQuicklinkStore } from '@/stores/quicklink-store'
 import { useSnippetStore } from '@/stores/snippet-store'
 import { cn } from '@/utils/cn'
@@ -92,6 +108,25 @@ type PaletteAction = {
 }
 
 const KIKKO_GITHUB_URL = 'https://github.com/GalitskyKK/kikko'
+
+/** Оригинальный favicon поисковика с fallback на лупу при ошибке загрузки. */
+function SearchEngineIcon({ engine }: { engine: (typeof SEARCH_ENGINES)[number] }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return <Search className="text-muted-foreground h-5 w-5 shrink-0" aria-hidden />
+  }
+  return (
+    <img
+      src={engine.icon}
+      alt=""
+      className="h-5 w-5 shrink-0 rounded-sm object-contain"
+      width={20}
+      height={20}
+      onError={() => setFailed(true)}
+      loading="lazy"
+    />
+  )
+}
 
 export function PalettePage() {
   const navigate = useNavigate()
@@ -127,6 +162,19 @@ export function PalettePage() {
   const showStartSuggestions = useSettingsStore((state) => state.general.showStartSuggestions)
   const closeOnEscape = useSettingsStore((state) => state.general.closeOnEscape)
   const showAppIcons = useSettingsStore((state) => state.appearance.showAppIcons)
+  const uiDensity = useSettingsStore((state) => state.appearance.uiDensity)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('density-compact', uiDensity === 'compact')
+  }, [uiDensity])
+  const {
+    recordUsage: recordSuggestionUsage,
+    recordResultUsage,
+    getScore: getSuggestionScore,
+    getFrequentResultIds,
+    resultMeta: frequentResultMeta,
+    usage: suggestionUsage,
+  } = useSuggestionUsageStore()
   const enabledExtensions = useSettingsStore(
     (state) =>
       state.extensions ?? {
@@ -450,22 +498,11 @@ export function PalettePage() {
           }
         }
         if (
-          matchesQuick(queryLower, 'Quick Links', [
-            'quicklinks',
-            'quick links',
-            'links',
-            'search quicklinks',
-          ])
+          // NOTE: intentionally no "Quick Links" quick-action.
+          // It conflicts with plugin searchables (`plugin-quicklinks-search`) and tends to win for short queries like "quick".
+          false
         ) {
-          quickActions.push({
-            id: 'quick-quicklinks',
-            type: 'command',
-            section: 'command',
-            title: 'Quick Links',
-            subtitle: 'Open saved links',
-            score: 0.95,
-            action: () => setMode('quicklinks'),
-          })
+          // no-op
         }
         if (
           enabledExtensions.dashboard &&
@@ -1102,16 +1139,309 @@ export function PalettePage() {
     return c.success ? c : null
   }, [query])
 
-  const startSuggestions = useMemo(
-    () => [
+  const DEFAULT_SUGGESTION_IDS = useMemo(
+    () =>
+      new Set([
+        'start-clipboard',
+        'start-settings',
+        'start-dashboard',
+        'start-snippets-search',
+        'start-snippets-create',
+        'start-quicklinks',
+      ]),
+    [],
+  )
+
+  const startSuggestions = useMemo(() => {
+    type SuggestionItem = {
+      id: string
+      title: string
+      subtitle: string
+      icon: React.ComponentType<IconProps>
+      iconClassName: string
+      /** Для приложений — путь к exe для нативной иконки */
+      iconPath?: string
+      /** Секция для бейджа (часто используемые) */
+      section?: string
+      action: () => void
+    }
+
+    const resolveFrequentToItem = (meta: FrequentResultMeta): SuggestionItem | null => {
+      const icon = getSuggestionIconComponent(meta.id, meta.section)
+      const iconClassName = getSuggestionIconClassName(meta.id, meta.section)
+      const canonical = getCanonicalSuggestionLabel(meta.id)
+      const title = canonical?.title ?? meta.title
+      const subtitle = canonical?.subtitle ?? meta.subtitle ?? 'Kikkō'
+      if (meta.id === 'quick-clipboard') {
+        return {
+          id: meta.id,
+          title,
+          subtitle,
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => {
+            setQuery('')
+            setMode('clipboard')
+          },
+        }
+      }
+      if (meta.id === 'quick-calc') {
+        return {
+          id: meta.id,
+          title,
+          subtitle,
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => setMode('calculator'),
+        }
+      }
+      if (meta.id === 'quick-snippets-search') {
+        return {
+          id: meta.id,
+          title,
+          subtitle,
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => setMode('snippets'),
+        }
+      }
+      if (meta.id === 'quick-snippets-create') {
+        return {
+          id: meta.id,
+          title,
+          subtitle,
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => {
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
+            }
+            void openSettingsWindow()
+            hideWindow()
+          },
+        }
+      }
+      if (meta.id === 'quick-dashboard') {
+        return {
+          id: meta.id,
+          title,
+          subtitle,
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => {
+            void openDashboardWindow()
+            hideWindow()
+          },
+        }
+      }
+      if (meta.id === 'quick-settings') {
+        return {
+          id: meta.id,
+          title,
+          subtitle,
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => {
+            void openSettingsWindow()
+            hideWindow()
+          },
+        }
+      }
+      if (meta.id === 'plugin-emoji-picker') {
+        return {
+          id: meta.id,
+          title: meta.title,
+          subtitle: meta.subtitle ?? 'Plugin',
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => setMode('emoji'),
+        }
+      }
+      if (meta.id === 'plugin-quicklinks-search') {
+        return {
+          id: meta.id,
+          title: meta.title,
+          subtitle: meta.subtitle ?? 'Plugin',
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => setMode('quicklinks'),
+        }
+      }
+      if (meta.id === 'plugin-quicklinks-create') {
+        return {
+          id: meta.id,
+          title: meta.title,
+          subtitle: meta.subtitle ?? 'Plugin',
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => {
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem('kikko:settings:focus-section', 'quicklinks')
+            }
+            void openSettingsWindow()
+            hideWindow()
+          },
+        }
+      }
+      if (meta.id === 'plugin-uuid-generate') {
+        return {
+          id: meta.id,
+          title: meta.title,
+          subtitle: meta.subtitle ?? 'Plugin',
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => {
+            if (isTauriRuntime()) {
+              const value = crypto.randomUUID()
+              void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(value))
+              void import('@/components/ui/sonner').then(({ toast }) => toast.success('UUID copied to clipboard'))
+            }
+            hideWindow()
+          },
+        }
+      }
+      if (meta.section === 'application' && isTauriRuntime()) {
+        const app = useInstalledAppsStore.getState().apps.find((a) => a.id === meta.id)
+        if (app?.path) {
+          return {
+            id: meta.id,
+            title: meta.title,
+            subtitle: meta.subtitle ?? 'Application',
+            icon,
+            iconClassName,
+            iconPath: app.path,
+            section: meta.section,
+            action: () => {
+              void import('@tauri-apps/api/core').then(({ invoke }) => invoke('open_path', { path: app.path }))
+              hideWindow()
+            },
+          }
+        }
+        return null
+      }
+      if (meta.section === 'command' && isTauriRuntime()) {
+        const cmd = getSystemCommandById(meta.id)
+        if (cmd) {
+          return {
+            id: meta.id,
+            title: meta.title,
+            subtitle: meta.subtitle ?? 'Command',
+            icon,
+            iconClassName,
+            section: meta.section,
+            action: () => {
+              void import('@tauri-apps/api/core').then(({ invoke }) => {
+                if (cmd.mode === 'settings' && cmd.settingsSectionId) {
+                  return invoke('open_system_preferences', { sectionId: cmd.settingsSectionId })
+                }
+                return invoke<{ exit_code?: number; supported?: boolean }>('run_system_command', {
+                  input: { command: cmd.id, args: cmd.args ?? [] },
+                }).then((output) => {
+                  if (cmd.fallbackSettingsSectionId && output && (!output.supported || output.exit_code !== 0)) {
+                    return invoke('open_system_preferences', { sectionId: cmd.fallbackSettingsSectionId })
+                  }
+                })
+                  .catch(() => {
+                    if (cmd.fallbackSettingsSectionId) {
+                      return invoke('open_system_preferences', { sectionId: cmd.fallbackSettingsSectionId })
+                    }
+                  })
+              })
+              hideWindow()
+            },
+          }
+        }
+        return null
+      }
+      if (meta.section === 'file' && meta.subtitle && isTauriRuntime()) {
+        return {
+          id: meta.id,
+          title: meta.title,
+          subtitle: meta.subtitle,
+          icon,
+          iconClassName,
+          section: meta.section,
+          action: () => {
+            void import('@tauri-apps/api/core').then(({ invoke }) => invoke('open_path', { path: meta.subtitle }))
+            hideWindow()
+          },
+        }
+      }
+      if (meta.section === 'plugin') {
+        const quicklink = useQuicklinkStore.getState().quicklinks.find((q) => q.id === meta.id)
+        if (quicklink && isTauriRuntime()) {
+          return {
+            id: meta.id,
+            title: meta.title,
+            subtitle: meta.subtitle ?? quicklink.url,
+            icon,
+            iconClassName,
+            section: meta.section,
+            action: () => {
+              void import('@tauri-apps/plugin-shell').then(({ open }) => open(quicklink.url))
+              hideWindow()
+            },
+          }
+        }
+      }
+      if (meta.section === 'clipboard' && isTauriRuntime()) {
+        const entry = useClipboardStore.getState().entries.find((e) => e.id === meta.id)
+        if (entry) {
+          return {
+            id: meta.id,
+            title: meta.title,
+            subtitle: meta.subtitle ?? 'Clipboard',
+            icon,
+            iconClassName,
+            section: meta.section,
+            action: () => {
+              void import('@tauri-apps/api/core').then(({ invoke }) => invoke('write_clipboard_entry', { id: meta.id }))
+              hideWindow()
+            },
+          }
+        }
+      }
+      if (meta.section === 'snippet' && isTauriRuntime()) {
+        const snippet = useSnippetStore.getState().snippets.find((s) => s.id === meta.id)
+        if (snippet) {
+          return {
+            id: meta.id,
+            title: meta.title,
+            subtitle: meta.subtitle ?? snippet.keyword,
+            icon,
+            iconClassName,
+            section: meta.section,
+            action: () => {
+              void import('@tauri-apps/api/core').then(({ invoke }) => invoke('mark_snippet_used', { id: meta.id }))
+              void import('@tauri-apps/plugin-clipboard-manager').then(({ writeText }) => writeText(snippet.content))
+              hideWindow()
+            },
+          }
+        }
+      }
+      return null
+    }
+
+    const raw: SuggestionItem[] = [
       ...(enabledExtensions.clipboard
         ? [
             {
               id: 'start-clipboard',
               title: STRINGS.palette.clipboardHistory,
-              subtitle: 'Kikkō',
-              icon: ClipboardList,
-              iconClassName: 'text-sky-500 dark:text-sky-400',
+              subtitle: APP_NAME,
+              section: 'clipboard' as const,
+              icon: getSuggestionIconComponent('start-clipboard'),
+              iconClassName: getSuggestionIconClassName('start-clipboard'),
               action: () => {
                 setQuery('')
                 setMode('clipboard')
@@ -1122,9 +1452,10 @@ export function PalettePage() {
       {
         id: 'start-settings',
         title: STRINGS.palette.settings,
-        subtitle: 'Kikkō',
-        icon: Cog,
-        iconClassName: 'text-violet-500 dark:text-violet-400',
+        subtitle: APP_NAME,
+        section: 'preferences' as const,
+        icon: getSuggestionIconComponent('start-settings'),
+        iconClassName: getSuggestionIconClassName('start-settings'),
         action: () => {
           void openSettingsWindow()
           hideWindow()
@@ -1135,9 +1466,10 @@ export function PalettePage() {
             {
               id: 'start-dashboard',
               title: STRINGS.palette.dashboard,
-              subtitle: 'Kikkō',
-              icon: LayoutDashboard,
-              iconClassName: 'text-amber-500 dark:text-amber-400',
+              subtitle: APP_NAME,
+              section: 'command' as const,
+              icon: getSuggestionIconComponent('start-dashboard'),
+              iconClassName: getSuggestionIconClassName('start-dashboard'),
               action: () => {
                 void openDashboardWindow()
                 hideWindow()
@@ -1150,17 +1482,19 @@ export function PalettePage() {
             {
               id: 'start-snippets-search',
               title: 'Search Snippets',
-              subtitle: 'Kikkō',
-              icon: FileText,
-              iconClassName: 'text-emerald-500 dark:text-emerald-400',
+              subtitle: 'Open saved snippets',
+              section: 'snippet' as const,
+              icon: getSuggestionIconComponent('start-snippets-search'),
+              iconClassName: getSuggestionIconClassName('start-snippets-search'),
               action: () => setMode('snippets'),
             },
             {
               id: 'start-snippets-create',
               title: 'Create Snippet',
-              subtitle: 'Kikkō',
-              icon: FileText,
-              iconClassName: 'text-emerald-500 dark:text-emerald-400',
+              subtitle: 'Add new snippet in Settings',
+              section: 'snippet' as const,
+              icon: getSuggestionIconComponent('start-snippets-create'),
+              iconClassName: getSuggestionIconClassName('start-snippets-create'),
               action: () => {
                 if (typeof window !== 'undefined') {
                   window.localStorage.setItem('kikko:settings:focus-section', 'snippets')
@@ -1174,20 +1508,53 @@ export function PalettePage() {
       {
         id: 'start-quicklinks',
         title: 'Quick Links',
-        subtitle: 'Kikkō',
-        icon: Link,
-        iconClassName: 'text-blue-500 dark:text-blue-400',
+        subtitle: APP_NAME,
+        section: 'plugin' as const,
+        icon: getSuggestionIconComponent('start-quicklinks'),
+        iconClassName: getSuggestionIconClassName('start-quicklinks'),
         action: () => setMode('quicklinks'),
       },
-      // Калькулятор не в саджестах — встроен в поиск (достаточно ввести выражение)
-    ],
-    [
-      enabledExtensions.clipboard,
-      enabledExtensions.dashboard,
-      enabledExtensions.snippets,
-      hideWindow,
-    ],
-  )
+    ]
+    const defaultItems: SuggestionItem[] = raw.map((item) => ({
+      ...item,
+      action: () => {
+        recordSuggestionUsage(item.id)
+        item.action()
+      },
+    }))
+
+    const frequentIds = getFrequentResultIds(15, DEFAULT_SUGGESTION_IDS)
+    const frequentItems: SuggestionItem[] = []
+    for (const id of frequentIds) {
+      const meta = frequentResultMeta[id]
+      if (!meta) continue
+      const item = resolveFrequentToItem(meta)
+      if (item) {
+        frequentItems.push({
+          ...item,
+          action: () => {
+            recordResultUsage(meta)
+            item.action()
+          },
+        })
+      }
+    }
+
+    const combined = [...defaultItems, ...frequentItems]
+    return sortSuggestionsByRelevance(combined, getSuggestionScore).slice(0, 5)
+  }, [
+    enabledExtensions.clipboard,
+    enabledExtensions.dashboard,
+    enabledExtensions.snippets,
+    hideWindow,
+    recordSuggestionUsage,
+    recordResultUsage,
+    getSuggestionScore,
+    getFrequentResultIds,
+    frequentResultMeta,
+    suggestionUsage,
+    DEFAULT_SUGGESTION_IDS,
+  ])
 
   const [selectionScrollSignal, setSelectionScrollSignal] = useState(0)
 
@@ -1218,10 +1585,20 @@ export function PalettePage() {
     }
   }, [])
 
-  const runResultAction = useCallback((result: SearchResult) => {
-    result.action()
-    setPaletteView('results')
-  }, [])
+  const runResultAction = useCallback(
+    (result: SearchResult) => {
+      recordResultUsage({
+        id: result.id,
+        section: result.section ?? result.type,
+        type: result.type,
+        title: result.title,
+        subtitle: result.subtitle,
+      })
+      result.action()
+      setPaletteView('results')
+    },
+    [recordResultUsage],
+  )
 
   const selectSearchResult = useCallback(
     (result: SearchResult) => {
@@ -1450,7 +1827,10 @@ export function PalettePage() {
         return
       }
       // Layout-independent: works on RU/EN keyboard layouts
-      if ((event.ctrlKey || event.metaKey) && (event.code === 'KeyK' || event.key.toLowerCase() === 'k')) {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.code === 'KeyK' || event.key.toLowerCase() === 'k')
+      ) {
         event.preventDefault()
         toggleActionsView()
         return
@@ -1970,9 +2350,7 @@ export function PalettePage() {
                                   data-emoji-selected={isSelected ? true : undefined}
                                   className={cn(
                                     'flex h-9 w-9 cursor-pointer items-center justify-center rounded text-xl transition-colors',
-                                    isSelected
-                                      ? 'bg-accent'
-                                      : 'hover:bg-muted/60',
+                                    isSelected ? 'bg-accent' : 'hover:bg-muted/60',
                                   )}
                                   onClick={() => {
                                     if (!isTauriRuntime()) return
@@ -2058,20 +2436,43 @@ export function PalettePage() {
 
             {isRootMode && shouldShowStartSuggestions && (
               <Command.Group heading={STRINGS.palette.startSuggestions}>
-                {startSuggestions.map((item) => (
-                  <Command.Item
-                    key={item.id}
-                    value={`suggestion:${item.id}`}
-                    onSelect={item.action}
-                    className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
-                  >
-                    <item.icon className={cn('h-4 w-4 shrink-0', item.iconClassName)} aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                    <span className="text-muted-foreground max-w-[160px] shrink-0 truncate text-xs opacity-80">
-                      {item.subtitle}
-                    </span>
-                  </Command.Item>
-                ))}
+                {startSuggestions.map((item) => {
+                  const iconMeta = getSuggestionIconMeta(item.id, item.section)
+                  const categoryType =
+                    item.section === 'application'
+                      ? 'app'
+                      : item.section === 'preferences'
+                        ? 'command'
+                        : item.section ?? 'plugin'
+                  const hideSubtitleInline = categoryType === 'app' && item.subtitle?.toLowerCase() === 'application'
+                  return (
+                    <Command.Item
+                      key={item.id}
+                      value={`suggestion:${item.id}`}
+                      onSelect={item.action}
+                      className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
+                    >
+                      <PaletteIconBadge type={iconMeta.type} size="sm">
+                        {item.iconPath ? (
+                          <AppNativeIcon appPath={item.iconPath} className="h-4 w-4 shrink-0" />
+                        ) : undefined}
+                      </PaletteIconBadge>
+                      <span className="min-w-0 flex-1 truncate">
+                        <span className="inline-flex max-w-full min-w-0 items-baseline gap-2">
+                          <span className="min-w-0 truncate">{item.title}</span>
+                          {item.subtitle && !hideSubtitleInline && (
+                            <span className="text-muted-foreground min-w-0 truncate text-xs opacity-80">
+                              {item.subtitle}
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                      <span className="bg-muted text-muted-foreground shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase opacity-80">
+                        {getCategoryLabel(categoryType)}
+                      </span>
+                    </Command.Item>
+                  )
+                })}
               </Command.Group>
             )}
 
@@ -2142,7 +2543,7 @@ export function PalettePage() {
                             >
                               <ResultIcon result={result} showAppIcons={showAppIcons} />
                               <span className="min-w-0 flex-1 truncate">
-                                <span className="inline-flex min-w-0 max-w-full items-baseline gap-2">
+                                <span className="inline-flex max-w-full min-w-0 items-baseline gap-2">
                                   <span className="min-w-0 truncate">{result.title}</span>
                                   {result.subtitle &&
                                     !(
@@ -2183,7 +2584,7 @@ export function PalettePage() {
                         }}
                         className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
                       >
-                        <Search className="text-muted-foreground h-5 w-5 shrink-0" aria-hidden />
+                        <SearchEngineIcon engine={engine} />
                         <span className="min-w-0 flex-1 truncate">{engine.name}</span>
                         <span className="text-muted-foreground shrink-0 truncate text-xs">
                           {STRINGS.palette.webSearches}
@@ -2237,7 +2638,7 @@ export function PalettePage() {
         )}
 
         {isFooterMenuOpen && footerMenuActions.length > 0 && (
-          <div className="pointer-events-none absolute left-3 bottom-12 z-20 w-[240px]">
+          <div className="pointer-events-none absolute bottom-12 left-3 z-20 w-[240px]">
             <div
               ref={footerMenuPanelRef}
               className="border-border/70 bg-background/92 pointer-events-auto rounded-xl border p-1.5 shadow-xl backdrop-blur-md"
@@ -2297,9 +2698,9 @@ export function PalettePage() {
                   setSelectedFooterMenuIndex(0)
                 }}
                 className={cn(
-                  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-muted-foreground cursor-pointer transition-colors duration-150 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',
-                  'hover:bg-[hsl(var(--accent))] hover:text-accent-foreground',
-                  isFooterMenuOpen && 'bg-[hsl(var(--accent))] text-accent-foreground',
+                  'text-muted-foreground inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-xl transition-colors duration-150 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50',
+                  'hover:text-accent-foreground hover:bg-[hsl(var(--accent))]',
+                  isFooterMenuOpen && 'text-accent-foreground bg-[hsl(var(--accent))]',
                 )}
               >
                 <MoreHorizontal className="h-4 w-4" aria-hidden />
@@ -2334,7 +2735,7 @@ export function PalettePage() {
                     }
                     results[0]?.action()
                   }}
-                  className="h-7 border border-transparent cursor-pointer bg-transparent px-2 text-[11px] hover:bg-transparent hover:text-foreground"
+                  className="hover:text-foreground h-7 cursor-pointer border border-transparent bg-transparent px-2 text-[11px] hover:bg-transparent"
                 >
                   {isClipboardMode
                     ? STRINGS.palette.actionPaste
@@ -2348,7 +2749,7 @@ export function PalettePage() {
               <div
                 className={cn(
                   'flex items-center rounded-lg px-1 py-0.5 transition-colors hover:bg-[hsl(var(--accent))]',
-                  isActionsView && 'bg-[hsl(var(--accent))] text-accent-foreground',
+                  isActionsView && 'text-accent-foreground bg-[hsl(var(--accent))]',
                 )}
               >
                 <Button
@@ -2356,7 +2757,7 @@ export function PalettePage() {
                   size="sm"
                   aria-pressed={isActionsView}
                   onClick={toggleActionsView}
-                  className="h-7 border border-transparent bg-transparent px-2 text-[11px] hover:bg-transparent hover:text-foreground aria-pressed:ring-0 aria-pressed:border-transparent cursor-pointer"
+                  className="hover:text-foreground h-7 cursor-pointer border border-transparent bg-transparent px-2 text-[11px] hover:bg-transparent aria-pressed:border-transparent aria-pressed:ring-0"
                 >
                   {STRINGS.palette.actions}
                 </Button>
@@ -2414,6 +2815,26 @@ function normalizeGroup(result: SearchResult): keyof GroupedResults {
   if (result.type === 'snippet') return 'snippet'
   if (result.type === 'calculator') return 'calculator'
   return 'command'
+}
+
+/** Канонические title/subtitle для известных id, чтобы в саджестах отображалось так же, как в поиске (без старых/опечатанных данных из localStorage). */
+function getCanonicalSuggestionLabel(id: string): { title: string; subtitle: string } | null {
+  switch (id) {
+    case 'quick-clipboard':
+      return { title: STRINGS.palette.clipboardHistory, subtitle: APP_NAME }
+    case 'quick-calc':
+      return { title: STRINGS.palette.calculator, subtitle: APP_NAME }
+    case 'quick-snippets-search':
+      return { title: 'Search Snippets', subtitle: 'Open saved snippets' }
+    case 'quick-snippets-create':
+      return { title: 'Create Snippet', subtitle: 'Add new snippet in Settings' }
+    case 'quick-dashboard':
+      return { title: STRINGS.palette.dashboard, subtitle: APP_NAME }
+    case 'quick-settings':
+      return { title: STRINGS.palette.settings, subtitle: APP_NAME }
+    default:
+      return null
+  }
 }
 
 function getGroupLabel(group: keyof GroupedResults): string {
@@ -2528,28 +2949,24 @@ function ResultIcon({
   result: { type: string; icon?: string }
   showAppIcons: boolean
 }) {
-  if (showAppIcons && (result.type === 'app' || result.type === 'file') && result.icon) {
-    return <AppNativeIcon appPath={result.icon} />
-  }
-  const type = result.type
-  const Icon =
-    type === 'app'
-      ? AppWindow
-      : type === 'file'
-        ? FileText
-        : type === 'clipboard'
-          ? ClipboardList
-          : type === 'snippet'
-            ? FileText
-            : type === 'calculator'
-              ? Calculator
-              : type === 'plugin'
-                ? Sparkles
-                : Zap
-  return <Icon className={cn('h-5 w-5 shrink-0', getResultIconTone(type))} />
+  const useNative =
+    showAppIcons && (result.type === 'app' || result.type === 'file') && result.icon
+  return (
+    <PaletteIconBadge type={result.type} size="md">
+      {useNative ? (
+        <AppNativeIcon appPath={result.icon!} className="h-5 w-5 shrink-0" />
+      ) : undefined}
+    </PaletteIconBadge>
+  )
 }
 
-function AppNativeIcon({ appPath }: { appPath: string }) {
+function AppNativeIcon({
+  appPath,
+  className = 'h-5 w-5 shrink-0',
+}: {
+  appPath: string
+  className?: string
+}) {
   const [source, setSource] = useState<string | null>(() => appIconUrlCache.get(appPath) ?? null)
 
   useEffect(() => {
@@ -2578,33 +2995,17 @@ function AppNativeIcon({ appPath }: { appPath: string }) {
   }, [appPath])
 
   if (!source) {
-    return <AppWindow className="text-muted-foreground h-5 w-5 shrink-0" />
+    return <AppWindow className={cn('text-muted-foreground shrink-0', className)} />
   }
 
   return (
     <img
       src={source}
       alt=""
-      className="h-5 w-5 shrink-0 rounded-sm object-contain"
+      className={cn('shrink-0 rounded-sm object-contain', className)}
       loading="lazy"
       aria-hidden
     />
   )
 }
 
-function getResultIconTone(type: string): string {
-  switch (type) {
-    case 'clipboard':
-      return 'text-sky-500 dark:text-sky-400'
-    case 'calculator':
-      return 'text-rose-500 dark:text-rose-400'
-    case 'snippet':
-      return 'text-emerald-500 dark:text-emerald-400'
-    case 'plugin':
-      return 'text-violet-500 dark:text-violet-400'
-    case 'command':
-      return 'text-amber-500 dark:text-amber-400'
-    default:
-      return 'text-muted-foreground'
-  }
-}

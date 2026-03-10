@@ -137,35 +137,38 @@ function useApplyAutostartOnStartup() {
 
 function useSettingsSyncOnWindowFocus() {
   useEffect(() => {
-    if (!isTauriRuntime()) return
-    let disposed = false
-    let unlistenFocus: (() => void) | null = null
-
     const rehydrate = () => {
       void useSettingsStore.persist.rehydrate()
     }
 
     rehydrate()
+
+    // Синхронизация при изменении настроек в другом окне (Settings/Dashboard)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'kikko-settings' || (e.key?.startsWith('kikko') ?? false)) {
+        rehydrate()
+      }
+    }
+    window.addEventListener('storage', onStorage)
+
+    if (!isTauriRuntime()) {
+      return () => window.removeEventListener('storage', onStorage)
+    }
+
+    let unlistenFocus: (() => void) | null = null
     void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-      if (disposed) return
       const currentWindow = getCurrentWindow()
       const unlistenPromise = currentWindow.onFocusChanged(({ payload }) => {
         if (payload) rehydrate()
       })
       void unlistenPromise.then((fn) => {
-        if (disposed) {
-          fn()
-          return
-        }
         unlistenFocus = fn
       })
     })
 
     return () => {
-      disposed = true
-      if (unlistenFocus) {
-        unlistenFocus()
-      }
+      window.removeEventListener('storage', onStorage)
+      if (unlistenFocus) unlistenFocus()
     }
   }, [])
 }

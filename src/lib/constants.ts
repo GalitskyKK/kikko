@@ -93,9 +93,9 @@ export const PALETTE_LIST_MAX_HEIGHT_PX = 420
 /** Верхний отступ окна Command Palette в px (Raycast-стиль: компактно от верха) */
 export const PALETTE_TOP_PADDING_PX = 86
 
-/** Поисковые системы для блока «Искать в вебе». URL с плейсхолдером {{q}} для запроса. */
+/** Поисковые системы для блока «Искать в вебе». URL с плейсхолдером {{q}} для запроса. icon — официальный favicon. */
 export const SEARCH_ENGINES = [
-  { id: 'google', name: 'Google Search', url: 'https://www.google.com/search?q={{q}}' },
-  { id: 'duckduckgo', name: 'DuckDuckGo Search', url: 'https://duckduckgo.com/?q={{q}}' },
-  { id: 'bing', name: 'Bing Search', url: 'https://www.bing.com/search?q={{q}}' },
+  { id: 'google', name: 'Google Search', url: 'https://www.google.com/search?q={{q}}', icon: 'https://www.google.com/favicon.ico' },
+  { id: 'duckduckgo', name: 'DuckDuckGo Search', url: 'https://duckduckgo.com/?q={{q}}', icon: 'https://duckduckgo.com/favicon.ico' },
+  { id: 'bing', name: 'Bing Search', url: 'https://www.bing.com/search?q={{q}}', icon: 'https://www.bing.com/favicon.ico' },
 ] as const
