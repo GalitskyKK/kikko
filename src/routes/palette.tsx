@@ -1926,7 +1926,7 @@ export function PalettePage() {
                       >
                         <FileText className="h-4 w-4 shrink-0 text-emerald-500 dark:text-emerald-400" />
                         <span className="min-w-0 flex-1 truncate">{snippet.name}</span>
-                        <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
+                        <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs opacity-80">
                           {snippet.keyword}
                         </span>
                       </Command.Item>
@@ -2040,7 +2040,7 @@ export function PalettePage() {
                       >
                         <Link className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden />
                         <span className="min-w-0 flex-1 truncate">{q.name}</span>
-                        <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
+                        <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs opacity-80">
                           {q.url}
                         </span>
                       </Command.Item>
@@ -2067,7 +2067,7 @@ export function PalettePage() {
                   >
                     <item.icon className={cn('h-4 w-4 shrink-0', item.iconClassName)} aria-hidden />
                     <span className="min-w-0 flex-1 truncate">{item.title}</span>
-                    <span className="text-muted-foreground max-w-[160px] shrink-0 truncate text-xs">
+                    <span className="text-muted-foreground max-w-[160px] shrink-0 truncate text-xs opacity-80">
                       {item.subtitle}
                     </span>
                   </Command.Item>
@@ -2141,17 +2141,21 @@ export function PalettePage() {
                               className="text-foreground flex cursor-pointer items-center gap-3 text-sm"
                             >
                               <ResultIcon result={result} showAppIcons={showAppIcons} />
-                              <span className="min-w-0 flex-1 truncate">{result.title}</span>
-                              {result.subtitle &&
-                                !(
-                                  result.type === 'app' &&
-                                  result.subtitle.toLowerCase() === 'application'
-                                ) && (
-                                  <span className="text-muted-foreground max-w-[220px] shrink-0 truncate text-xs">
-                                    {result.subtitle}
-                                  </span>
-                                )}
-                              <span className="bg-muted/70 text-muted-foreground shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+                              <span className="min-w-0 flex-1 truncate">
+                                <span className="inline-flex min-w-0 max-w-full items-baseline gap-2">
+                                  <span className="min-w-0 truncate">{result.title}</span>
+                                  {result.subtitle &&
+                                    !(
+                                      result.type === 'app' &&
+                                      result.subtitle.toLowerCase() === 'application'
+                                    ) && (
+                                      <span className="text-muted-foreground min-w-0 truncate text-xs opacity-80">
+                                        {result.subtitle}
+                                      </span>
+                                    )}
+                                </span>
+                              </span>
+                              <span className="bg-muted text-muted-foreground shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase opacity-80">
                                 {getCategoryLabel(result.type)}
                               </span>
                             </Command.Item>
